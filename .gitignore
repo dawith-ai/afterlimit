@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.log
+*_state.json
+.DS_Store
+.env
+cron_oauth_token
