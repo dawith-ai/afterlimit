@@ -25,6 +25,13 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from notify import notify as _messenger_notify
+except Exception:  # notify.py 없거나 오류 → 알림만 조용히 생략
+    def _messenger_notify(_m: str) -> list:
+        return []
+
 KST = timezone(timedelta(hours=9))
 STATE_FILE = Path("/tmp/openclaw_tmux_resume_state.json")
 LOG_FILE = Path("/tmp/openclaw_tmux_resume.log")
@@ -151,6 +158,11 @@ def main() -> int:
         last_sent[pane] = now.isoformat()
         fired += 1
         _log(f"  ▶️ send-keys 계속 — {pane} (reset {reset.strftime('%H:%M')} 도달)")
+        ch = _messenger_notify(
+            f"⏯ Claude 터미널 자동 재개 — {pane} (reset {reset.strftime('%H:%M')} 도달, 이전 작업 이어감)"
+        )
+        if ch:
+            _log(f"     📨 알림 전송: {', '.join(ch)}")
     if fired:
         _save_state(state)
     return 0

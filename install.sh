@@ -27,6 +27,14 @@ for label in tmux-resume resume-safety; do
   echo "✅ 설치: com.claude-terminal-auto.$label"
 done
 
+# 메신저 알림 설정 템플릿 (Discord/Telegram/Slack/임의 웹훅) — 채우면 재개 시 알림
+CFG_DIR="$HOME/.config/claude-terminal-auto"
+mkdir -p "$CFG_DIR"
+if [ ! -f "$CFG_DIR/notify.json" ] && [ -f "$REPO_DIR/notify.example.json" ]; then
+  cp "$REPO_DIR/notify.example.json" "$CFG_DIR/notify.json"
+  echo "📨 알림 설정 템플릿 생성: $CFG_DIR/notify.json (webhook/토큰 채우면 알림 켜짐)"
+fi
+
 # /지속 슬래시 명령 설치 (Claude Code 사용자용 — 선택)
 CMD_DIR="$HOME/.claude/commands"
 if [ -f "$REPO_DIR/commands/지속.md" ]; then

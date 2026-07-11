@@ -1,0 +1,9 @@
+{
+  "discord_webhook": "",
+  "telegram_token": "",
+  "telegram_chat_id": "",
+  "slack_webhook": "",
+  "generic_webhooks": [
+    { "name": "example-mattermost", "url": "", "field": "text" }
+  ]
+}

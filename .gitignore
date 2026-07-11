@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 .env
 cron_oauth_token
+notify.json
+*.local.json

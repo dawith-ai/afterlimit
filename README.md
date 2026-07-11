@@ -2,7 +2,9 @@
 
 Claude Code 세션이 사용량 한도(usage limit)에 걸려 멈췄을 때, **리셋 시각이 되면 자동으로 "계속"을 입력해 작업을 이어가는** macOS 백그라운드 도구.
 
-터미널 앞에 앉아 파란 **"1번(계속)"을 직접 누르고 기다릴 필요가 없습니다.** 자리를 비워도 리셋 시각에 알아서 이어집니다.
+터미널 앞에 앉아 파란 **"1번(계속)"을 직접 누르고 기다릴 필요가 없습니다.** 자리를 비워도 리셋 시각에 알아서 이어지고, 이어간 뒤엔 **Discord·Telegram·Slack 등으로 알림**을 보내 자리를 비워도 진행 상황을 압니다.
+
+**전체 흐름**: git URL을 Claude Code에 주기 → `install.sh` → `/지속` 자동 설치 → 사용자가 `/지속` 하고 자리 비움 → 토큰 리셋 시각에 이전 작업 자동 이어감 → 메신저로 알림.
 
 ## 핵심: 감시는 토큰 0
 
@@ -49,6 +51,29 @@ launchctl list | grep claude-terminal-auto
 
 - **백그라운드 자동**(launchd) = 타이핑 없이 리셋 시각에 자동
 - **`/지속`**(슬래시) = 리셋 직후 5분 안 기다리고 즉시 시작하고 싶을 때 수동 트리거
+
+## 메신저 알림 (Discord / Telegram / Slack / 임의 웹훅)
+
+작업이 자동으로 이어질 때 메신저로 알림을 받습니다. `install.sh`가 `~/.config/claude-terminal-auto/notify.json` 템플릿을 만들어두니, **원하는 채널만 채우면** 켜집니다(아무것도 안 채우면 조용히 비활성).
+
+```jsonc
+{
+  "discord_webhook": "https://discord.com/api/webhooks/...",   // Discord Incoming Webhook
+  "telegram_token": "123456:ABC...",                            // Telegram 봇 토큰
+  "telegram_chat_id": "12345678",                               // Telegram chat id
+  "slack_webhook": "https://hooks.slack.com/services/...",      // Slack Incoming Webhook
+  "generic_webhooks": [                                         // 그 외 다양한 메신저 (코드 수정 없이)
+    { "name": "mattermost", "url": "https://.../hooks/xxx", "field": "text" }
+  ]
+}
+```
+
+- **다양한 메신저 추가 2가지 방법**:
+  1. **코드 없이** — `generic_webhooks`에 `{url, field, name}` 추가 (Mattermost·Google Chat·Slack호환 등 JSON POST 받는 서비스 대부분)
+  2. **전용 함수** — `scripts/notify.py`의 `_send_*` 함수 만들고 `_SENDERS`에 한 줄 (형식이 특수할 때)
+- 환경변수로도 설정 가능: `CLAUDE_AUTO_DISCORD_WEBHOOK` / `CLAUDE_AUTO_TELEGRAM_TOKEN` / `CLAUDE_AUTO_TELEGRAM_CHAT_ID` / `CLAUDE_AUTO_SLACK_WEBHOOK`
+- 테스트: `python3 scripts/notify.py "테스트"` → 설정된 채널로 발송
+- ⚠️ `notify.json`은 토큰/웹훅이 담기므로 `.gitignore`로 커밋 제외됨 (레포엔 빈 `notify.example.json`만 포함).
 
 ## 동작 원리
 

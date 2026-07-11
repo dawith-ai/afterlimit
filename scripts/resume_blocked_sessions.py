@@ -45,6 +45,15 @@ LOG_FILE = Path("/tmp/openclaw_resume_safety.log")
 LOCK_FILE = Path("/tmp/openclaw_resume_safety.lock")
 DISCORD_API = "https://discord.com/api/v10"
 
+# 일반 메신저 알림 (Discord/Telegram/Slack/임의 웹훅) — 같은 폴더 notify.py, 설정 없으면 no-op
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from notify import notify as _messenger_notify
+except Exception:
+    def _messenger_notify(_m: str) -> list:
+        return []
+
 # lsof 는 /usr/sbin 에 있는데 launchd PATH 엔 /usr/sbin 이 없음 → 절대경로로 호출.
 # (2026-06-09 fix: live cwd 양보가 launchd 에서 FileNotFoundError 로 무효화되던 버그)
 _LSOF = next((p for p in ("/usr/sbin/lsof", "/usr/bin/lsof", "/opt/homebrew/bin/lsof")
@@ -430,7 +439,12 @@ def _notify(content: str, important: bool = False) -> bool:
             f.write(f"[{datetime.now(KST).isoformat()}]\n{content}\n\n")
     except Exception:
         pass
-    # 중요하지 않으면 여기서 끝 — 디스코드/macOS 알림 생략
+    # 일반 메신저(Discord/Telegram/Slack/임의 웹훅) 전송 — notify.json 설정된 경우만, 실패 무시
+    try:
+        _messenger_notify(content)
+    except Exception:
+        pass
+    # 중요하지 않으면 (로컬 봇/macOS 알림은) 여기서 끝
     if not important:
         return True
     # 2. 봇 admin_cmd 사용 — 봇이 살아있으면 작업방에 발사
