@@ -27,5 +27,15 @@ for label in tmux-resume resume-safety; do
   echo "✅ 설치: com.claude-terminal-auto.$label"
 done
 
+# /지속 슬래시 명령 설치 (Claude Code 사용자용 — 선택)
+CMD_DIR="$HOME/.claude/commands"
+if [ -f "$REPO_DIR/commands/지속.md" ]; then
+  mkdir -p "$CMD_DIR"
+  sed -e "s|__REPO_DIR__|$REPO_DIR|g" \
+      -e "s|__PYTHON__|$PYTHON|g" \
+      "$REPO_DIR/commands/지속.md" > "$CMD_DIR/지속.md"
+  echo "✅ 설치: /지속 슬래시 명령 (~/.claude/commands/지속.md)"
+fi
+
 echo ""
 echo "완료. 상태 확인:  launchctl list | grep claude-terminal-auto"
