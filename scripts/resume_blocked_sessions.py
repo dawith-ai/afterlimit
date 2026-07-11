@@ -865,10 +865,9 @@ def main() -> int:
     # (2026-06-08 fix: news-auto 1967개가 MAX_RESUME 20 슬롯을 독점해 타 레포 기아 발생 → 공정화)
     by_repo: dict = {}
     for s in blocked:
-        # ★ 2026-06-21 fix: basename 으로 묶으면 운영본(/Users/dawith/news-auto)과
-        #   작업본(/Users/dawith/개발/news-auto)이 둘 다 "news-auto" 로 같은 큐에 섞여,
-        #   세션 많은 작업본이 운영본을 pop(0) 뒤로 계속 밀어냄(운영본 재개 7 vs 작업본 32).
-        #   → 전체 cwd 를 키로 써서 두 경로를 별도 큐로 분리, 운영본도 매 사이클 슬롯 보장.
+        # ★ 2026-06-21 fix: basename 으로 묶으면 서로 다른 경로의 동명 레포(운영본/작업본)가
+        #   둘 다 같은 이름으로 같은 큐에 섞여, 세션 많은 쪽이 다른 쪽을 pop(0) 뒤로 계속 밀어냄.
+        #   → 전체 cwd 를 키로 써서 두 경로를 별도 큐로 분리, 양쪽 다 매 사이클 슬롯 보장.
         repo = s["cwd"].rstrip("/")
         by_repo.setdefault(repo, []).append(s)
     # ★ 2026-07-03 알뜰: 프로젝트(cwd)당 '최신 세션 1개'만 재개 대상으로 축소.
@@ -882,9 +881,9 @@ def main() -> int:
     if _dedup_before > _dedup_after:
         _log(f"  🪙 프로젝트당 최신1개로 중복제거: {_dedup_before} → {_dedup_after} (토큰절약)")
     ordered: list = []
-    # ★ 2026-06-21: 운영본 news-auto(cron 발행이 실제 도는 곳)를 라운드로빈 맨 앞 큐로
-    #   배치해 매 사이클 첫 슬롯 보장 (사용자가 /지속 건 실작업 세션이 토큰리셋 후 안 끊기게).
-    _LIVE_PRIORITY = "/Users/dawith/news-auto"
+    # ★ 환경변수 CLAUDE_AUTO_LIVE_PRIORITY 로 지정한 cwd 를 라운드로빈 맨 앞 큐로 배치해
+    #   매 사이클 첫 슬롯 보장 (핵심 실작업 세션이 토큰리셋 후 안 끊기게). 미설정이면 동등 처리.
+    _LIVE_PRIORITY = os.environ.get("CLAUDE_AUTO_LIVE_PRIORITY", "").rstrip("/")
     queues = sorted(
         by_repo.values(),
         key=lambda q: 0 if (q and q[0]["cwd"].rstrip("/") == _LIVE_PRIORITY) else 1,
