@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -35,6 +36,8 @@ STATE_FILE = Path("/tmp/openclaw_tmux_resume_state.json")
 LOG_FILE = Path("/tmp/openclaw_tmux_resume.log")
 DIAG_FILE = Path("/tmp/openclaw_tmux_resume_DIAG.log")
 PROOF_FILE = Path("/tmp/openclaw_tmux_resume_PROOF.log")   # 한도→continue→재개 전 사이클 검증 기록
+USAGE_CACHE = Path("/tmp/openclaw_usage_cache.json")       # API usage 캐시 (리셋시각·사용률)
+USAGE_TTL = 120                                            # usage API 재조회 간격(초) — 효율
 CONFIG_FILE = Path.home() / ".config" / "claude-terminal-auto" / "notify.json"
 MENU_COOLDOWN = 120       # 같은 메뉴에 '1' 반복 방지
 CONTINUE_COOLDOWN = 300   # 'continue' 재시도 간격
@@ -151,6 +154,54 @@ def _parse_reset(text: str, now: datetime):
                key=lambda x: abs((x - now).total_seconds()))
 
 
+def _oauth_token() -> str:
+    """Claude OAuth 액세스 토큰 — cron 파일(resume-safety가 갱신) 우선, 없으면 키체인."""
+    try:
+        t = (Path.home() / ".claude" / "cron_oauth_token").read_text(encoding="utf-8").strip()
+        if t.startswith("sk-ant-oat"):
+            return t
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                           capture_output=True, text=True, timeout=8)
+        return json.loads(r.stdout.strip()).get("claudeAiOauth", {}).get("accessToken", "") or ""
+    except Exception:
+        return ""
+
+
+def _api_usage() -> dict:
+    """usage API에서 {reset: datetime|None, util: float|None} 반환. TTL 캐시(효율)."""
+    try:
+        c = json.loads(USAGE_CACHE.read_text(encoding="utf-8"))
+        if time.time() - c.get("fetched", 0) < USAGE_TTL:
+            rs = c.get("reset")
+            return {"reset": datetime.fromisoformat(rs) if rs else None, "util": c.get("util")}
+    except Exception:
+        pass
+    tok = _oauth_token()
+    if not tok:
+        return {"reset": None, "util": None}
+    try:
+        req = urllib.request.Request(
+            "https://api.anthropic.com/api/oauth/usage",
+            headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+        fh = data.get("five_hour") or {}
+        rs = fh.get("resets_at")
+        reset = datetime.fromisoformat(rs).astimezone(KST) if rs else None
+        out = {"reset": reset, "util": fh.get("utilization")}
+        try:
+            USAGE_CACHE.write_text(json.dumps(
+                {"fetched": time.time(), "reset": reset.isoformat() if reset else "", "util": out["util"]}))
+        except Exception:
+            pass
+        return out
+    except Exception:
+        return {"reset": None, "util": None}
+
+
 def main() -> int:
     if not _tmux("ls"):
         return 0
@@ -195,7 +246,7 @@ def main() -> int:
 
         # ── 한도 감지 (메뉴 or 인라인) → 대기 등록 + 메뉴면 '1' ──
         if menu_active or inline_active:
-            r = _parse_reset(scan, now)
+            r = _api_usage()["reset"] or _parse_reset(scan, now)   # ★ API 정확 리셋시각 우선, 화면파싱 폴백
             r_iso = r.isoformat() if r else ""
             if not st or st.get("reset_at") != r_iso:      # 새 한도 창
                 st = {"reset_at": r_iso, "detected_at": now.isoformat(),
