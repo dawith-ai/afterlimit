@@ -34,6 +34,7 @@ KST = timezone(timedelta(hours=9))
 STATE_FILE = Path("/tmp/openclaw_tmux_resume_state.json")
 LOG_FILE = Path("/tmp/openclaw_tmux_resume.log")
 DIAG_FILE = Path("/tmp/openclaw_tmux_resume_DIAG.log")
+PROOF_FILE = Path("/tmp/openclaw_tmux_resume_PROOF.log")   # 한도→continue→재개 전 사이클 검증 기록
 CONFIG_FILE = Path.home() / ".config" / "claude-terminal-auto" / "notify.json"
 MENU_COOLDOWN = 120       # 같은 메뉴에 '1' 반복 방지
 CONTINUE_COOLDOWN = 300   # 'continue' 재시도 간격
@@ -72,6 +73,14 @@ def _diag(msg: str) -> None:
     try:
         with DIAG_FILE.open("a", encoding="utf-8") as f:
             f.write(f"[{datetime.now(KST).isoformat()}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _proof(msg: str) -> None:
+    try:
+        with PROOF_FILE.open("a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now(KST).isoformat()}] ✅ 검증 {msg}\n")
     except Exception:
         pass
 
@@ -167,7 +176,15 @@ def main() -> int:
 
         generating = GENERATING in low
         st = waits.get(pane)
-        if generating:                       # 작업중 = 재개됨 → 표시만
+        if generating:                       # 작업중 = 재개됨
+            if st and st.get("last_try") and not st.get("proof_done"):
+                # ★ 한도감지 → continue 전송 → 재개까지 전 사이클 검증 (제 말이 아닌 증거)
+                _proof(f"{pane} | 한도감지 {(st.get('detected_at') or '?')[11:19]} "
+                       f"→ continue 전송 {(st.get('last_try') or '?')[11:19]} "
+                       f"→ 작업재개 확인 {now.strftime('%H:%M:%S')}")
+                _messenger_notify(f"✅ [자동재개 검증완료] {pane} — 한도 걸림→continue 전송→작업 재개까지 "
+                                  f"확인됨. 증거: /tmp/openclaw_tmux_resume_PROOF.log")
+                st["proof_done"] = True
             if st:
                 st["resumed"] = True
                 waits[pane] = st
@@ -181,7 +198,8 @@ def main() -> int:
             r = _parse_reset(scan, now)
             r_iso = r.isoformat() if r else ""
             if not st or st.get("reset_at") != r_iso:      # 새 한도 창
-                st = {"reset_at": r_iso, "pressed1": None, "last_try": None, "resumed": False}
+                st = {"reset_at": r_iso, "detected_at": now.isoformat(),
+                      "pressed1": None, "last_try": None, "resumed": False}
                 waits[pane] = st
                 _log(f"  ⏸ 한도 감지({'메뉴' if menu_active else '인라인'}) — {pane} · "
                      f"reset={r.strftime('%H:%M') if r else '?'}")
