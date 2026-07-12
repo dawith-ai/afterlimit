@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
-"""scripts/tmux_resume_watcher.py — tmux 안의 Claude Code 세션 자동 재개 (2단계).
+"""scripts/tmux_resume_watcher.py — tmux 안의 Claude Code 세션 자동 재개.
 
-★ 핵심 사실: Claude Code에서 한도 메뉴의 "Stop and wait for limit to reset"를
-   선택해도 리셋 시 '자동으로 이어지지 않는다'(GitHub #18980/#35744, 미구현).
-   리셋 후 사용자가 직접 "continue"를 입력해야 작업이 재개된다.
-   → 이 watcher가 그 2단계를 대신 한다:
+★ 사실: "Stop and wait for limit to reset"를 골라도 리셋 시 자동 재개 안 됨
+   (Claude Code 미구현, GitHub #18980/#35744). 리셋 후 "continue"를 쳐야 이어짐.
+★ 한도 UI 2종류 모두 처리:
+   (A) 메뉴형   — "What do you want to do? / 1. Stop and wait / 2. Upgrade" → '1' 눌러 대기
+   (B) 인라인형 — "You've hit your session limit · resets 1:20am" (프롬프트에 표시)
+   두 경우 모두: 리셋 시각 도달 → "continue" 전송해 실제 재개.
 
-   [1단계] 한도 메뉴 감지 → "1"(Stop and wait) 눌러 '대기' 상태 진입 + reset 시각 파싱
-   [2단계] reset 시각 도달 → "continue" 입력 → 실제로 이전 작업 재개
-
-한도 메뉴:
-    What do you want to do?
-    ❯ 1. Stop and wait for limit to reset
-      2. Upgrade your plan
-
-== 모드 (설정: ~/.config/claude-terminal-auto/notify.json 의 "resume_mode") ==
-- "token_only" (기본): 위 2단계(토큰 한도)만.
-- "keep_going": 위에 더해, 완료 후 유휴 세션도 "계속 진행"으로 넛지(밤새 안 멈춤).
+== 모드 (~/.config/claude-terminal-auto/notify.json 의 "resume_mode") ==
+- "token_only"(기본): 위 한도 재개만.  "keep_going": + 완료 후 유휴 세션 넛지.
 
 == 설치 == launchd StartInterval 60. tmux 밖 세션엔 키 주입 불가.
 """
@@ -43,16 +36,20 @@ LOG_FILE = Path("/tmp/openclaw_tmux_resume.log")
 DIAG_FILE = Path("/tmp/openclaw_tmux_resume_DIAG.log")
 CONFIG_FILE = Path.home() / ".config" / "claude-terminal-auto" / "notify.json"
 MENU_COOLDOWN = 120       # 같은 메뉴에 '1' 반복 방지
-CONTINUE_COOLDOWN = 300   # 'continue' 재전송 간격
-FALLBACK_WAIT = 300       # reset 시각을 못 읽었을 때 대기 후 시도
-NUDGE_COOLDOWN = 900      # keep_going 넛지 간격 (15분)
+CONTINUE_COOLDOWN = 300   # 'continue' 재시도 간격
+NUDGE_COOLDOWN = 900      # keep_going 넛지 간격
 TAIL_CHARS = 700
+BOTTOM_CHARS = 450        # 인라인 한도는 화면 하단만
 SCAN_CHARS = 1400         # reset 시각은 넓게 검색
 
+# (A) 인터랙티브 메뉴 시그니처 (셋 다)
 MENU_SIGNS = ("stop and wait for", "limit to reset", "upgrade your plan")
-NOT_MENU = ("bypass permissions", "esc to interrupt")
-DIAG_SIGNS = ("what do you want to do", "limit to reset", "stop and wait", "usage limit",
-              "5-hour limit", "weekly limit", "limit reached", "approaching", "resets")
+# (B) 인라인 한도 메시지 시그니처 (하나라도, 화면 하단에)
+INLINE_SIGNS = ("hit your session limit", "hit your usage limit", "session limit · resets",
+                "5-hour limit reached", "weekly limit reached", "usage limit · resets")
+GENERATING = "esc to interrupt"   # 작업중 신호
+DIAG_SIGNS = ("what do you want to do", "limit to reset", "stop and wait", "hit your session limit",
+              "usage limit", "5-hour limit", "weekly limit", "limit reached", "approaching", "resets ")
 _PROMPT_DRAFT = re.compile(r"❯\s+\S")
 RESET_RE = re.compile(
     r"resets?\s+(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})\s+at\s+)?"
@@ -84,6 +81,12 @@ def _tmux(*args: str) -> str:
         return subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return ""
+
+
+def _tmux_send(pane: str, text: str) -> None:
+    _tmux("send-keys", "-t", pane, text)
+    time.sleep(0.4)
+    _tmux("send-keys", "-t", pane, "Enter")
 
 
 def _cfg(key: str, default: str) -> str:
@@ -119,6 +122,7 @@ def _cooled(iso, secs, now) -> bool:
 
 
 def _parse_reset(text: str, now: datetime):
+    """리셋 시각 파싱. 시간만 있으면 now 에 '가장 가까운 발생'(어제/오늘/내일)을 고른다."""
     m = RESET_RE.search(text)
     if not m:
         return None
@@ -128,21 +132,14 @@ def _parse_reset(text: str, now: datetime):
         hour += 12
     elif m.group(5).lower() == "am" and hour == 12:
         hour = 0
-    if m.group(1) and m.group(2):  # "resets Jun 12 at 11pm"
+    if m.group(1) and m.group(2):   # "resets Jun 12 at 11pm" — 명시 날짜
         try:
             return datetime(now.year, _MONTH[m.group(1).lower()], int(m.group(2)), hour, minute, tzinfo=KST)
         except ValueError:
             return now + timedelta(hours=1)
-    r = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if r < now - timedelta(hours=1):   # 자정 넘김 등: 한참 과거로 읽히면 내일로
-        r += timedelta(days=1)
-    return r
-
-
-def _tmux_send(pane: str, text: str) -> None:
-    _tmux("send-keys", "-t", pane, text)
-    time.sleep(0.4)
-    _tmux("send-keys", "-t", pane, "Enter")
+    base = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return min((base - timedelta(days=1), base, base + timedelta(days=1)),
+               key=lambda x: abs((x - now).total_seconds()))
 
 
 def main() -> int:
@@ -152,60 +149,74 @@ def main() -> int:
     mode = _cfg("resume_mode", "token_only").lower()
     cont = _cfg("continue_prompt", "continue")
     state = _load_state()
-    waits = state.setdefault("waits", {})   # 토큰 한도 대기 상태
-    idle = state.setdefault("idle", {})      # keep_going 유휴 추적
+    waits = state.setdefault("waits", {})
+    idle = state.setdefault("idle", {})
     panes = _tmux("list-panes", "-a", "-F", "#{pane_id}").split()
     for pane in panes:
         content = _tmux("capture-pane", "-t", pane, "-p")
         if not content:
             continue
         low = content[-TAIL_CHARS:].lower()
+        bottom = content[-BOTTOM_CHARS:].lower()
         scan = content[-SCAN_CHARS:].lower()
         if any(k in scan for k in DIAG_SIGNS):
             r = _parse_reset(scan, now)
             _diag(f"{pane} | menu={all(s in low for s in MENU_SIGNS)} | "
-                  f"guard={[s for s in NOT_MENU if s in low] or '없음'} | "
-                  f"reset={r.strftime('%m-%d %H:%M') if r else '?'} | 화면:{content[-500:].strip()!r}")
+                  f"inline={any(s in bottom for s in INLINE_SIGNS)} | gen={GENERATING in low} | "
+                  f"reset={r.strftime('%m-%d %H:%M') if r else '?'} | 화면:{content[-460:].strip()!r}")
 
+        generating = GENERATING in low
         st = waits.get(pane)
-        # ── 1단계: 한도 메뉴 → '1'(Stop and wait) + reset 시각 확보 ──
-        menu_active = all(s in low for s in MENU_SIGNS) and not any(s in low for s in NOT_MENU)
-        if menu_active:
-            if not (st and _cooled(st.get("menu_at"), MENU_COOLDOWN, now)):
-                _tmux_send(pane, "1")
-                r = _parse_reset(scan, now)
-                waits[pane] = {"menu_at": now.isoformat(),
-                               "reset_at": (r.isoformat() if r else ""),
-                               "cont_at": None}
-                _log(f"  ⏸ 1단계 한도메뉴 '1'(대기) — {pane} · reset={r.strftime('%H:%M') if r else '?'}")
-                _messenger_notify(f"⏸ Claude 한도 감지 — {pane} 대기 진입, 리셋"
-                                  f"({r.strftime('%H:%M') if r else '?'}) 시 자동 continue 예정")
+        if generating:                       # 작업중 = 재개됨 → 표시만
+            if st:
+                st["resumed"] = True
+                waits[pane] = st
             continue
-        # ── 2단계: '대기' pane → reset 도달 시 'continue' 전송(실제 재개) ──
-        if st:
-            if "esc to interrupt" in low:      # 다시 생성중 = 재개됨 → 상태 클리어
-                waits.pop(pane, None)
-                continue
+
+        menu_active = all(s in low for s in MENU_SIGNS)
+        inline_active = any(s in bottom for s in INLINE_SIGNS)
+
+        # ── 한도 감지 (메뉴 or 인라인) → 대기 등록 + 메뉴면 '1' ──
+        if menu_active or inline_active:
+            r = _parse_reset(scan, now)
+            r_iso = r.isoformat() if r else ""
+            if not st or st.get("reset_at") != r_iso:      # 새 한도 창
+                st = {"reset_at": r_iso, "pressed1": None, "last_try": None, "resumed": False}
+                waits[pane] = st
+                _log(f"  ⏸ 한도 감지({'메뉴' if menu_active else '인라인'}) — {pane} · "
+                     f"reset={r.strftime('%H:%M') if r else '?'}")
+                _messenger_notify(f"⏸ Claude 한도 감지 — {pane}, 리셋"
+                                  f"({r.strftime('%H:%M') if r else '?'}) 시 자동 continue 예정")
+            if menu_active and not _cooled(st.get("pressed1"), MENU_COOLDOWN, now):
+                _tmux_send(pane, "1")          # 메뉴 → 옵션1(대기)
+                st["pressed1"] = now.isoformat()
+                waits[pane] = st
+                _log(f"  ▶️ 메뉴 '1'(대기) — {pane}")
+
+        # ── 대기 상태 pane → reset 도달 시 'continue' (재개 전까지 재시도) ──
+        if st and not st.get("resumed"):
             reset_at = st.get("reset_at")
+            ready = True
             if reset_at:
                 try:
                     ready = now >= datetime.fromisoformat(reset_at)
                 except Exception:
                     ready = True
-            else:
-                ready = not _cooled(st.get("menu_at"), FALLBACK_WAIT, now)
-            if ready and not _cooled(st.get("cont_at"), CONTINUE_COOLDOWN, now):
+            if ready and not _cooled(st.get("last_try"), CONTINUE_COOLDOWN, now):
                 _tmux_send(pane, cont)
-                st["cont_at"] = now.isoformat()
+                st["last_try"] = now.isoformat()
                 waits[pane] = st
-                _log(f"  ▶️ 2단계 리셋 도달 → '{cont}' 전송(작업 재개) — {pane}")
+                _log(f"  ▶️ 리셋 도달 → '{cont}' 전송(재개 시도) — {pane}")
                 _messenger_notify(f"⏯ Claude 리셋 도달 — {pane}에 '{cont}' 전송, 이전 작업 재개")
             continue
-        # ── keep_going: 완료 후 유휴 세션 넛지 (선택 모드) ──
-        if mode == "keep_going":
-            if "esc to interrupt" in low or "bypass permissions" not in low:
-                continue
-            if _PROMPT_DRAFT.search(content[-400:]):   # 사용자 draft → 건드리지 않음
+
+        # ── 재개 완료 + 한도문구 사라짐 → 상태 정리 ──
+        if st and st.get("resumed") and not (menu_active or inline_active):
+            waits.pop(pane, None)
+
+        # ── keep_going: 완료 후 유휴 세션 넛지 (대기상태 아닐 때만) ──
+        if mode == "keep_going" and not waits.get(pane):
+            if _PROMPT_DRAFT.search(content[-400:]) or "bypass permissions" not in low:
                 idle[pane] = {"sig": content[-500:], "nudged": idle.get(pane, {}).get("nudged")}
                 continue
             prev = idle.get(pane, {})
