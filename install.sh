@@ -35,14 +35,19 @@ if [ ! -f "$CFG_DIR/notify.json" ] && [ -f "$REPO_DIR/notify.example.json" ]; th
   echo "📨 알림 설정 템플릿 생성: $CFG_DIR/notify.json (webhook/토큰 채우면 알림 켜짐)"
 fi
 
-# /지속 슬래시 명령 설치 (Claude Code 사용자용 — 선택)
+# 슬래시 명령 설치 (Claude Code 사용자용 — 각 언어별 /continue /지속 /继续 /続行 …)
 CMD_DIR="$HOME/.claude/commands"
-if [ -f "$REPO_DIR/commands/지속.md" ]; then
+if [ -d "$REPO_DIR/commands" ]; then
   mkdir -p "$CMD_DIR"
-  sed -e "s|__REPO_DIR__|$REPO_DIR|g" \
-      -e "s|__PYTHON__|$PYTHON|g" \
-      "$REPO_DIR/commands/지속.md" > "$CMD_DIR/지속.md"
-  echo "✅ 설치: /지속 슬래시 명령 (~/.claude/commands/지속.md)"
+  n=0
+  for cmd in "$REPO_DIR"/commands/*.md; do
+    [ -e "$cmd" ] || continue
+    sed -e "s|__REPO_DIR__|$REPO_DIR|g" \
+        -e "s|__PYTHON__|$PYTHON|g" \
+        "$cmd" > "$CMD_DIR/$(basename "$cmd")"
+    n=$((n + 1))
+  done
+  echo "✅ 설치: 각 언어 슬래시 명령 ${n}개 (→ ~/.claude/commands/)"
 fi
 
 echo ""

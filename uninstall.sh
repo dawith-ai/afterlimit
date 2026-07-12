@@ -12,4 +12,11 @@ for label in tmux-resume resume-safety; do
   echo "🗑  제거: com.claude-terminal-auto.$label"
 done
 
+# 각 언어 슬래시 명령 제거
+CMD_DIR="$HOME/.claude/commands"
+for c in continue 지속 继续 続行 continuar continuer weiter prosseguir продолжить; do
+  rm -f "$CMD_DIR/$c.md"
+done
+echo "🗑  제거: 각 언어 슬래시 명령"
+
 echo "완료."
