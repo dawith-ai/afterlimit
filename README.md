@@ -25,6 +25,21 @@ What do you want to do?
 
 두 안전망은 **안 겹칩니다**: `resume-safety`는 살아있는 세션이 있는 프로젝트엔 **양보**(같은 계정 quota 경쟁 방지)하고, 그 터미널은 `tmux-resume`가 담당합니다.
 
+## 모드 설정 (자동 이어가기 범위)
+
+`~/.config/claude-terminal-auto/notify.json` 의 `resume_mode` 로 **사용자가 직접 선택**합니다:
+
+| 모드 | 동작 | 토큰 |
+|---|---|---|
+| **`token_only`** (기본·추천) | 토큰 한도 메뉴만 자동 처리. 작업이 끝나면 물어보고 멈춤. | 아낌 |
+| **`keep_going`** | 위에 더해, **완료 후 유휴인 세션도 "계속 진행"으로 자동 넛지** → 밤새 안 멈춤. | 계속 씀 |
+
+```jsonc
+{ "resume_mode": "token_only" }   // 또는 "keep_going"
+```
+
+`keep_going` 안전장치: 생성중이거나 입력창에 사용자가 쓴 draft가 있으면 건드리지 않음, pane당 15분 쿨다운. (그래도 자율로 계속 일해서 토큰을 쓰므로 필요할 때만 켜세요.)
+
 ## 요구사항
 
 - **macOS** (launchd)
