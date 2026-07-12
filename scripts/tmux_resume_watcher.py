@@ -44,8 +44,12 @@ except Exception:  # notify.py 없거나 오류 → 알림만 조용히 생략
 KST = timezone(timedelta(hours=9))
 STATE_FILE = Path("/tmp/openclaw_tmux_resume_state.json")
 LOG_FILE = Path("/tmp/openclaw_tmux_resume.log")
+DIAG_FILE = Path("/tmp/openclaw_tmux_resume_DIAG.log")  # 한도 관련 화면 원문 진단 기록
 COOLDOWN_SEC = 300   # pane별 — 같은 메뉴 반복 입력 방지
 TAIL_CHARS = 700     # 현재 화면 하단만 검사
+# 진단용 — 한도 '비슷한' 신호가 있으면(발사 여부와 무관) 원문을 남긴다 → 실제 메뉴 문구 파악
+DIAG_SIGNS = ("what do you want to do", "limit to reset", "stop and wait",
+              "usage limit", "5-hour limit", "weekly limit", "approaching", "/upgrade")
 
 # 한도 결정 메뉴 시그니처 (셋 다 있어야 = 그 메뉴)
 MENU_SIGNS = ("stop and wait for", "limit to reset", "upgrade your plan")
@@ -61,6 +65,15 @@ def _log(msg: str) -> None:
     except Exception:
         pass
     print(line.strip())
+
+
+def _diag(msg: str) -> None:
+    """한도 관련 화면 원문 진단 기록 (발사 실패 원인 사후 분석용)."""
+    try:
+        with DIAG_FILE.open("a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now(KST).isoformat()}] {msg}\n")
+    except Exception:
+        pass
 
 
 def _tmux(*args: str) -> str:
@@ -99,6 +112,13 @@ def main() -> int:
         if not content:
             continue
         low = content[-TAIL_CHARS:].lower()
+        # 진단: 한도 '비슷한' 신호가 보이면 발사 여부와 무관하게 원문 기록 (실제 메뉴 문구 파악용)
+        if any(k in low for k in DIAG_SIGNS):
+            has3 = all(s in low for s in MENU_SIGNS)
+            guard = [s for s in NOT_MENU if s in low]
+            snap = content[-450:].replace("\n", " | ").strip()
+            _diag(f"{pane} | 메뉴3문구={has3} | 가드차단={guard or '없음'} | "
+                  f"발사={'예' if (has3 and not guard) else '아니오'} | 화면: {snap}")
         # 한도 결정 메뉴가 '활성'으로 떠 있나 (세 문구 다 + 일반바/생성중 아님)
         if not all(s in low for s in MENU_SIGNS):
             continue
