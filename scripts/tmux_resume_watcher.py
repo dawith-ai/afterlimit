@@ -46,6 +46,12 @@ _MONTH = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
 # 한도 메시지 시그니처 (claude CLI 가 출력하는 막힘 문구)
 LIMIT_MARKERS = ("hit your session limit", "session limit", "usage limit",
                  "5-hour limit", "weekly limit")
+# 활성 작업중 시그니처 — 이게 보이면 '멈춘' 게 아니라 '돌고 있는' 세션 → 발사 금지 (오탐 차단)
+ACTIVE_MARKERS = ("esc to interrupt", "esc to cancel", "tokens)", "cooked for",
+                  "cascading", "deliberating", "gesticulating", "churned", "thinking")
+TAIL_CHARS = 600   # 현재 화면 하단만 검사 (넓으면 스크롤백에 남은 옛 한도문구에 오탐)
+MAX_ATTEMPTS = 2   # 같은 reset 창 최대 시도 — 넘으면 무한루프 대신 '수동필요' 알림
+RETRY_SEC = 120    # 같은 창 재시도 최소 간격(초)
 
 
 def _log(msg: str) -> None:
@@ -124,45 +130,57 @@ def main() -> int:
         content = _tmux("capture-pane", "-t", pane, "-p")
         if not content:
             continue
-        tail = content[-1500:].lower()  # 마지막 화면만 (현재 상태)
-        if not any(mk in tail for mk in LIMIT_MARKERS):
+        low = content[-TAIL_CHARS:].lower()  # 현재 화면 하단만 (스크롤백 잔재 오탐 방지)
+        if not any(mk in low for mk in LIMIT_MARKERS):
             continue
-        # claude 류 화면인지 약하게 확인 (오탐 방지)
-        if "resets" not in tail and "/upgrade" not in tail:
+        if "resets" not in low and "/upgrade" not in low:
             continue
-        # cooldown
-        ls = last_sent.get(pane)
-        if ls:
-            try:
-                if (now - datetime.fromisoformat(ls)).total_seconds() < COOLDOWN_SEC:
-                    continue
-            except Exception:
-                pass
-        reset = _parse_reset(tail, now)
+        # ★ 활성 작업중이면 skip — 한도로 '멈춘' 게 아니라 '돌고 있는' 세션 (오탐 핵심 차단)
+        if any(w in low for w in ACTIVE_MARKERS):
+            continue
+        reset = _parse_reset(low, now)
         if reset is None:
             continue
         if now < reset:
             _log(f"  대기 {pane} — reset {reset.strftime('%H:%M')} 미도달")
             continue
-        # 리셋 도달 → 계속 입력
-        # ★ 사용자 수동 동작("stop 먼저 → 계속")을 그대로 재현 (06-20):
-        #   1) Escape 로 멈춘 한도화면/생성중 상태 해제(stop) 2) 텍스트 입력 3) 별도 Enter.
-        #   텍스트+Enter 를 한 번에 보내면 입력 버퍼 정착 전 제출돼 무시되던 문제 → 분리.
+        # ★ 무한루프 차단: 같은 reset 창엔 최대 MAX_ATTEMPTS 회만 시도 (구버전 str state 호환)
+        rk = reset.isoformat()
+        st = last_sent.get(pane)
+        if not isinstance(st, dict):
+            st = {}
+        if st.get("reset") == rk:
+            if st.get("attempts", 0) >= MAX_ATTEMPTS:
+                continue  # 이미 최대 시도·'수동필요' 알림 완료 → 조용히 skip
+            try:
+                if (now - datetime.fromisoformat(st["at"])).total_seconds() < RETRY_SEC:
+                    continue
+            except Exception:
+                pass
+            attempts = st.get("attempts", 0)
+        else:
+            attempts = 0
+        # 리셋 도달 → 계속 입력 (Escape 2회로 멈춤 해제 → 텍스트 → 별도 Enter)
         _tmux("send-keys", "-t", pane, "Escape")
         time.sleep(0.5)
-        _tmux("send-keys", "-t", pane, "Escape")  # 2회 — 메뉴/모달도 확실히 닫음
+        _tmux("send-keys", "-t", pane, "Escape")
         time.sleep(0.5)
         _tmux("send-keys", "-t", pane, "계속 이어서 진행해줘. 확인 질문 없이 자율로.")
         time.sleep(0.4)
         _tmux("send-keys", "-t", pane, "Enter")
-        last_sent[pane] = now.isoformat()
+        attempts += 1
+        last_sent[pane] = {"reset": rk, "attempts": attempts, "at": now.isoformat()}
         fired += 1
-        _log(f"  ▶️ send-keys 계속 — {pane} (reset {reset.strftime('%H:%M')} 도달)")
-        ch = _messenger_notify(
-            f"⏯ Claude 터미널 자동 재개 — {pane} (reset {reset.strftime('%H:%M')} 도달, 이전 작업 이어감)"
-        )
-        if ch:
-            _log(f"     📨 알림 전송: {', '.join(ch)}")
+        _log(f"  ▶️ send-keys 계속 — {pane} (reset {reset.strftime('%H:%M')} 도달, 시도 {attempts}/{MAX_ATTEMPTS})")
+        if attempts >= MAX_ATTEMPTS:
+            _log(f"  ⚠️ {pane} — {MAX_ATTEMPTS}회 시도해도 안 풀림. 수동 확인 필요")
+            _messenger_notify(
+                f"⚠️ Claude 터미널 {pane} 자동재개 {MAX_ATTEMPTS}회 실패 — 수동 확인 필요 (reset {reset.strftime('%H:%M')})"
+            )
+        else:
+            _messenger_notify(
+                f"⏯ Claude 터미널 자동 재개 시도 — {pane} (reset {reset.strftime('%H:%M')})"
+            )
     if fired:
         _save_state(state)
     return 0
