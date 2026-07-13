@@ -24,7 +24,7 @@ The watcher is **local Python that only scans your screen and files** — it nev
 
 | Name | Target | Action | Interval |
 |---|---|---|---|
-| **tmux-resume** (core) | live terminal sessions inside tmux | **2 steps**: at the limit menu selects option 1 (`1` → `Enter`), then **types `continue` when the limit resets** to actually resume the work | 60s |
+| **tmux-resume** (core) | live terminal sessions inside tmux | handles **both limit forms** (menu / inline), reads the exact reset time from the usage API, and **types `continue` at reset** to actually resume — verified end-to-end | 60s |
 | **resume-safety** (backup) | parked sessions you walked away from | scans conversation logs (jsonl) → `claude --resume` in the background at reset | 300s |
 
 They don't overlap: `resume-safety` **yields** on projects that have a live session (to avoid competing for the same account quota), and that terminal is handled by `tmux-resume`.
@@ -113,11 +113,11 @@ Get a ping when work auto-resumes. `install.sh` creates a template at `~/.config
 
 ## How it works
 
-- **tmux-resume** (`scripts/tmux_resume_watcher.py`): reads every pane with `tmux capture-pane` and runs a **2-step** flow. Why two steps: selecting "Stop and wait for limit to reset" does **not** auto-resume by itself — Claude Code sits idle at reset until you type `continue` (a known open issue, [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). So:
-  1. **At the menu** — when the menu (`What do you want to do? / 1. Stop and wait for limit to reset / 2. Upgrade your plan`) is active, it presses **`1` → `Enter`** to enter the wait state and parses the reset time (`resets 3pm`). (⚠️ It never sends `Esc`, which would cancel the menu.)
+- **tmux-resume** (`scripts/tmux_resume_watcher.py`): reads every pane with `tmux capture-pane` and runs a **2-step** flow across **both limit forms** — the interactive menu (`What do you want to do?`) and the inline message (`You've hit your session limit · resets 3pm`). Why two steps: selecting "Stop and wait for limit to reset" does **not** auto-resume by itself — Claude Code sits idle at reset until you type `continue` (a known open issue, [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). So:
+  1. **At the limit** — for the menu it presses **`1` → `Enter`** (never `Esc`, which cancels the menu); it reads the **exact reset time from the usage API** (`GET /api/oauth/usage` → `five_hour.resets_at`), falling back to on-screen parsing.
   2. **At the reset time** — it types **`continue`** (configurable via `continue_prompt`) to actually resume the interrupted work.
 
-  **False-positive guards**: acts only when all three menu phrases are present and the normal input bar (`bypass permissions`) / generating state (`esc to interrupt`) is not.
+  When a session confirms it resumed, the full cycle (limit detected → `continue` sent → work resumed) is recorded to `/tmp/openclaw_tmux_resume_PROOF.log` and pushed to your messenger. **Guards**: acts only when a limit form is present and the pane is idle (not the normal input bar `bypass permissions` / generating state `esc to interrupt`).
 - **resume-safety** (`scripts/resume_blocked_sessions.py`): scans conversation logs under `~/.claude/projects`, finds limit-blocked sessions, and resumes them with a fresh `claude --resume` process at reset. It has **frugality guards** (one resume per 5-hour session window, a session-usage yield threshold). For headless runs it reads the Claude OAuth token from the macOS keychain at runtime — never stored in source.
 
 ## Notes
