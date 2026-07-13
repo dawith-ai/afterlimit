@@ -270,8 +270,12 @@ def main() -> int:
                 waits[pane] = st
                 _log(f"  ▶️ 메뉴 '1'(대기) — {pane}")
 
-        # ── 대기 상태 pane → reset 도달 시 'continue' (재개 전까지 재시도) ──
+        # ── 대기 상태 pane → reset 도달 시 'continue' (1회; 한도 여전하면만 재시도, 풀리면 정리) ──
         if st and not st.get("resumed"):
+            limit_still = menu_active or inline_active
+            if st.get("last_try") and not limit_still:      # continue 후 한도표시 사라짐 = 재개됨 → 정리(과다전송 방지)
+                waits.pop(pane, None)
+                continue
             reset_at = st.get("reset_at")
             ready = True
             if reset_at:
@@ -279,7 +283,9 @@ def main() -> int:
                     ready = now >= datetime.fromisoformat(reset_at)
                 except Exception:
                     ready = True
-            if ready and not _cooled(st.get("last_try"), CONTINUE_COOLDOWN, now):
+            first = not st.get("last_try")
+            # 첫 시도(리셋 후) OR 한도가 여전히 떠있고(=continue 아직 안 먹음) 쿨다운 지남
+            if ready and (first or (limit_still and not _cooled(st.get("last_try"), CONTINUE_COOLDOWN, now))):
                 _tmux_send(pane, cont)
                 st["last_try"] = now.isoformat()
                 waits[pane] = st
