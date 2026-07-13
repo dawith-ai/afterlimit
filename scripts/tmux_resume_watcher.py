@@ -247,9 +247,17 @@ def main() -> int:
         # ── 한도 감지 (메뉴 or 인라인) → 대기 등록 + 메뉴면 '1' ──
         if menu_active or inline_active:
             r = _api_usage()["reset"] or _parse_reset(scan, now)   # ★ API 정확 리셋시각 우선, 화면파싱 폴백
-            r_iso = r.isoformat() if r else ""
-            if not st or st.get("reset_at") != r_iso:      # 새 한도 창
-                st = {"reset_at": r_iso, "detected_at": now.isoformat(),
+            # 같은 한도 창인지: 기존 reset과 2분 이내면 동일 취급
+            # (reset 미세변동·API↔화면 불일치로 인한 매사이클 재생성·알림/continue 스팸 방지)
+            same_window = False
+            if st and st.get("reset_at"):
+                try:
+                    same_window = (r is None) or abs(
+                        (r - datetime.fromisoformat(st["reset_at"])).total_seconds()) < 120
+                except Exception:
+                    same_window = False
+            if not same_window:                            # 새 한도 창일 때만 등록·알림
+                st = {"reset_at": (r.isoformat() if r else ""), "detected_at": now.isoformat(),
                       "pressed1": None, "last_try": None, "resumed": False}
                 waits[pane] = st
                 _log(f"  ⏸ 한도 감지({'메뉴' if menu_active else '인라인'}) — {pane} · "
