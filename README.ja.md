@@ -24,7 +24,7 @@ What do you want to do?
 
 | Name | Target | Action | Interval |
 |---|---|---|---|
-| **tmux-resume** (core) | tmux 内で動いているライブのターミナルセッション | 上限メニューを検出 → オプション 1「Stop and wait for limit to reset」を自動選択(`1` → `Enter`) | 60s |
+| **tmux-resume** (core) | tmux 内で動いているライブのターミナルセッション | **上限の両形式**(メニュー / インライン)に対応し、使用量 API から正確なリセット時刻を読み取り、**リセット時に `continue` を入力**して実際に作業を再開します — エンドツーエンドで検証済み | 60s |
 | **resume-safety** (backup) | 離席して放置したセッション | 会話ログ(jsonl)をスキャン → リセット時にバックグラウンドで `claude --resume` | 300s |
 
 両者は重複しません。`resume-safety` はライブセッションのあるプロジェクトでは **譲り**(同じアカウントの割り当てを取り合わないため)、そのターミナルは `tmux-resume` が担当します。
@@ -113,7 +113,11 @@ launchctl list | grep claude-terminal-auto
 
 ## 仕組み
 
-- **tmux-resume** (`scripts/tmux_resume_watcher.py`): `tmux capture-pane` で各ペインを読み取り、上限メニュー(`What do you want to do? / 1. Stop and wait for limit to reset / 2. Upgrade your plan`)が最下部で **アクティブ** なとき、`tmux send-keys` で **`1` → `Enter`** を押してオプション 1 を確定します → Claude がリセット時に作業を再開します。(⚠️ メニューをキャンセルしてしまう `Esc` は決して送りません。)**誤検出ガード**: 3 つのメニューフレーズがすべて存在し、かつ通常の入力バー(`bypass permissions`)/ 生成中の状態(`esc to interrupt`)がないときだけ発火します。ペインごとに 5 分のクールダウン。
+- **tmux-resume** (`scripts/tmux_resume_watcher.py`): `tmux capture-pane` で各ペインを読み取り、**上限の両形式** — 対話式メニュー(`What do you want to do?`)とインラインメッセージ(`You've hit your session limit · resets 3pm`)— にまたがって **2 ステップ** のフローを実行します。なぜ 2 ステップかというと、「Stop and wait for limit to reset」を選んでもそれ **だけでは** 自動再開しないからです — Claude Code はリセット時にアイドルのまま止まり、`continue` を入力するまで動きません(既知のオープンな issue、[#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744))。そこで:
+  1. **上限に達したとき** — メニューでは **`1` → `Enter`** を押します(メニューをキャンセルしてしまう `Esc` は決して押しません)。**使用量 API から正確なリセット時刻**(`GET /api/oauth/usage` → `five_hour.resets_at`)を読み取り、取得できない場合は画面上の解析にフォールバックします。
+  2. **リセット時刻になったとき** — **`continue`**(`continue_prompt` で設定可能)を入力して、中断された作業を実際に再開します。
+
+  セッションが再開を確認すると、一連のサイクル全体(上限検出 → `continue` 送信 → 作業再開)が `/tmp/openclaw_tmux_resume_PROOF.log` に記録され、あなたのメッセンジャーに送信されます。**ガード**: 上限の形式が存在し、かつペインがアイドルのとき(通常の入力バー `bypass permissions` / 生成中の状態 `esc to interrupt` ではないとき)だけ動作します。
 - **resume-safety** (`scripts/resume_blocked_sessions.py`): `~/.claude/projects` 以下の会話ログをスキャンし、上限でブロックされたセッションを見つけ、リセット時に新しい `claude --resume` プロセスで再開します。**倹約ガード**(5 時間のセッションウィンドウにつき 1 回の再開、セッション使用量の譲歩しきい値)を備えています。ヘッドレス実行時は、実行時に macOS キーチェーンから Claude の OAuth トークンを読み取ります。ソースには決して保存しません。
 
 ## 注意

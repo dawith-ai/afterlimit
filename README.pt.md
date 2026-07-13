@@ -24,7 +24,7 @@ O observador é **Python local que apenas varre sua tela e seus arquivos** — e
 
 | Name | Target | Action | Interval |
 |---|---|---|---|
-| **tmux-resume** (core) | live terminal sessions inside tmux | detects the limit menu → auto-selects option 1 "Stop and wait for limit to reset" (`1` → `Enter`) | 60s |
+| **tmux-resume** (core) | live terminal sessions inside tmux | lida com **ambos os formatos de limite** (menu / inline), lê o horário exato de reinício da API de uso e **digita `continue` no reinício** para de fato retomar — verificado de ponta a ponta | 60s |
 | **resume-safety** (backup) | parked sessions you walked away from | scans conversation logs (jsonl) → `claude --resume` in the background at reset | 300s |
 
 Elas não se sobrepõem: o `resume-safety` **cede** nos projetos que têm uma sessão ativa (para evitar competir pela mesma cota da conta), e esse terminal é tratado pelo `tmux-resume`.
@@ -113,7 +113,11 @@ Receba um aviso quando o trabalho for retomado automaticamente. O `install.sh` c
 
 ## Como funciona
 
-- **tmux-resume** (`scripts/tmux_resume_watcher.py`): lê cada painel com `tmux capture-pane`; quando o menu de limite (`What do you want to do? / 1. Stop and wait for limit to reset / 2. Upgrade your plan`) está **ativo** na parte de baixo, ele usa `tmux send-keys` para apertar **`1` → `Enter`**, confirmando a opção 1 → o Claude retoma seu trabalho no reinício. (⚠️ Ele nunca envia `Esc`, que cancelaria o menu.) **Proteções contra falsos positivos**: dispara apenas quando as três frases do menu estão presentes e a barra de entrada normal (`bypass permissions`) / o estado de geração (`esc to interrupt`) não está; tempo de espera de 5 minutos por painel.
+- **tmux-resume** (`scripts/tmux_resume_watcher.py`): lê cada painel com `tmux capture-pane` e executa um fluxo de **2 passos** em **ambos os formatos de limite** — o menu interativo (`What do you want to do?`) e a mensagem inline (`You've hit your session limit · resets 3pm`). Por que dois passos: selecionar "Stop and wait for limit to reset" **não** retoma sozinho — o Claude Code fica ocioso no reinício até você digitar `continue` (um problema conhecido em aberto, [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). Então:
+  1. **No limite** — para o menu ele aperta **`1` → `Enter`** (nunca `Esc`, que cancela o menu); ele lê o **horário exato de reinício da API de uso** (`GET /api/oauth/usage` → `five_hour.resets_at`), recorrendo à leitura da tela como alternativa.
+  2. **No horário de reinício** — ele digita **`continue`** (configurável via `continue_prompt`) para de fato retomar o trabalho interrompido.
+
+  Quando uma sessão confirma que retomou, o ciclo completo (limite detectado → `continue` enviado → trabalho retomado) é registrado em `/tmp/openclaw_tmux_resume_PROOF.log` e enviado ao seu mensageiro. **Proteções**: age apenas quando um formato de limite está presente e o painel está ocioso (não a barra de entrada normal `bypass permissions` / o estado de geração `esc to interrupt`).
 - **resume-safety** (`scripts/resume_blocked_sessions.py`): varre os logs de conversa em `~/.claude/projects`, encontra sessões bloqueadas por limite e as retoma com um novo processo `claude --resume` no reinício. Ele tem **proteções de frugalidade** (uma retomada por janela de sessão de 5 horas, um limiar de cessão por uso da sessão). Em execuções headless, ele lê o token OAuth do Claude do keychain do macOS em tempo de execução — nunca armazenado no código-fonte.
 
 ## Notas

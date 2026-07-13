@@ -24,7 +24,7 @@ What do you want to do?
 
 | Name | Target | Action | Interval |
 |---|---|---|---|
-| **tmux-resume**（核心） | tmux 内的实时终端会话 | 检测到上限菜单 → 自动选择选项 1 “Stop and wait for limit to reset”（`1` → `Enter`） | 60s |
+| **tmux-resume**（核心） | tmux 内的实时终端会话 | 同时处理 **两种上限形态**（菜单 / 内联），从用量 API 读取准确的重置时间，并在 **重置时输入 `continue`** 来真正恢复——已完成端到端验证 | 60s |
 | **resume-safety**（备份） | 你走开后搁置的会话 | 扫描对话日志（jsonl）→ 在重置时于后台执行 `claude --resume` | 300s |
 
 它们不会重叠：对于已有实时会话的项目，`resume-safety` 会 **让位**（以免争抢同一账户的额度），那个终端会由 `tmux-resume` 负责。
@@ -113,7 +113,11 @@ launchctl list | grep claude-terminal-auto
 
 ## 工作原理
 
-- **tmux-resume**（`scripts/tmux_resume_watcher.py`）：用 `tmux capture-pane` 读取每个窗格；当上限菜单（`What do you want to do? / 1. Stop and wait for limit to reset / 2. Upgrade your plan`）在底部处于 **激活** 状态时，它用 `tmux send-keys` 按下 **`1` → `Enter`**，确认选项 1 → Claude 在重置时恢复你的工作。（⚠️ 它绝不会发送 `Esc`，因为那会取消菜单。）**防误报保护**：仅当三条菜单短语全部出现、且不存在正常的输入栏（`bypass permissions`）/ 生成状态（`esc to interrupt`）时才触发；每个窗格有 5 分钟冷却时间。
+- **tmux-resume**（`scripts/tmux_resume_watcher.py`）：用 `tmux capture-pane` 读取每个窗格，并在 **两种上限形态** 上执行一个 **两步** 流程——交互式菜单（`What do you want to do?`）和内联消息（`You've hit your session limit · resets 3pm`）。为什么要两步：选择 "Stop and wait for limit to reset" 本身 **并不会** 自动恢复——Claude Code 在重置时会一直空闲，直到你输入 `continue`（一个已知的未决问题，[#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)）。所以：
+  1. **在触及上限时** —— 对于菜单，它按下 **`1` → `Enter`**（绝不用 `Esc`，因为那会取消菜单）；它从 **用量 API 读取准确的重置时间**（`GET /api/oauth/usage` → `five_hour.resets_at`），并在失败时回退到解析屏幕上的内容。
+  2. **在重置时刻** —— 它输入 **`continue`**（可通过 `continue_prompt` 配置），以真正恢复被中断的工作。
+
+  当某个会话确认已恢复时，完整周期（检测到上限 → 发送 `continue` → 工作恢复）会被记录到 `/tmp/openclaw_tmux_resume_PROOF.log`，并推送到你的即时通讯工具。**防误报保护**：仅当存在某种上限形态、且窗格处于空闲状态（不是正常的输入栏 `bypass permissions` / 生成状态 `esc to interrupt`）时才会动作。
 - **resume-safety**（`scripts/resume_blocked_sessions.py`）：扫描 `~/.claude/projects` 下的对话日志，找出被上限卡住的会话，并在重置时用一个全新的 `claude --resume` 进程恢复它们。它带有 **省钱保护**（每个 5 小时的会话窗口只恢复一次，以及一个会话用量的让位阈值）。对于无头运行，它在运行时从 macOS keychain 读取 Claude OAuth token —— 绝不存放在源代码中。
 
 ## 说明
