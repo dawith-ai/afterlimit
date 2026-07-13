@@ -108,6 +108,35 @@ def _cfg(key: str, default: str) -> str:
         return default
 
 
+# 시스템 언어별 재개 명령어 (리셋 후엔 아무 메시지나 보내면 재개되므로 각국 언어로 자연스럽게)
+LOCALIZED_CONTINUE = {
+    "en": "continue", "ko": "계속 진행해줘", "ja": "続けてください", "zh": "继续",
+    "es": "continúa", "fr": "continue", "de": "mach weiter", "pt": "continuar",
+    "ru": "продолжай", "it": "continua", "id": "lanjutkan", "vi": "tiếp tục",
+}
+
+
+def _system_lang() -> str:
+    """macOS 시스템 언어(2글자). 예: 'ko'. 못 읽으면 'en'."""
+    try:
+        loc = subprocess.run(["defaults", "read", "-g", "AppleLocale"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        code = loc.replace("-", "_").split("_")[0].lower()
+        if len(code) == 2 and code.isalpha():
+            return code
+    except Exception:
+        pass
+    return "en"
+
+
+def _continue_prompt() -> str:
+    """재개 명령어. 설정 continue_prompt가 명시되면 그것, 'auto'(기본)면 시스템 언어에 맞춰 자동."""
+    p = _cfg("continue_prompt", "auto")
+    if p and p.lower() != "auto":
+        return p
+    return LOCALIZED_CONTINUE.get(_system_lang(), "continue")
+
+
 def _load_state() -> dict:
     try:
         if STATE_FILE.exists():
@@ -207,7 +236,7 @@ def main() -> int:
         return 0
     now = datetime.now(KST)
     mode = _cfg("resume_mode", "token_only").lower()
-    cont = _cfg("continue_prompt", "continue")
+    cont = _continue_prompt()   # 시스템 언어 자동 (설정 continue_prompt로 수동 지정 가능)
     state = _load_state()
     waits = state.setdefault("waits", {})
     idle = state.setdefault("idle", {})

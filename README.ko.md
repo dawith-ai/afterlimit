@@ -115,7 +115,7 @@ launchctl list | grep claude-terminal-auto
 
 - **tmux-resume** (`scripts/tmux_resume_watcher.py`): `tmux capture-pane`로 모든 pane을 읽어 **한도 UI 2종**(메뉴형 `What do you want to do?` / 인라인형 `You've hit your session limit · resets 3pm`)을 **2단계**로 처리합니다. 왜 2단계냐면 — "Stop and wait for limit to reset"를 선택해도 **저절로 재개되지 않고**, 리셋 시각에 Claude Code가 멈춰 있다가 `continue`를 쳐야 이어지기 때문입니다(미구현 이슈 [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). 그래서:
   1. **한도에서** — 메뉴면 **`1` → `Enter`**(Esc 금지 — 메뉴 취소됨); **usage API**(`GET /api/oauth/usage` → `five_hour.resets_at`)로 **정확한 리셋 시각**을 읽습니다(실패 시 화면 파싱 폴백).
-  2. **리셋 시각에** — **`continue`**(설정 `continue_prompt`)를 입력해 실제로 중단된 작업을 재개합니다.
+  2. **리셋 시각에** — 재개 명령어를 입력해 실제로 중단된 작업을 재개합니다. **시스템 언어에 맞춰 자동 번역**됩니다(한국어면 `계속 진행해줘`, 日本語면 `続けてください`, 中文이면 `继续` …; `continue_prompt`로 수동 지정 가능, 기본 `"auto"`).
 
   재개가 확인되면 전 사이클(한도감지 → continue → 재개)을 `/tmp/openclaw_tmux_resume_PROOF.log`에 기록하고 메신저로 보냅니다. **오탐 차단**: 한도 형태가 있고 pane이 유휴(일반 입력바·생성중 아님)일 때만 동작.
 - **resume-safety** (`scripts/resume_blocked_sessions.py`): `~/.claude/projects`의 대화 로그를 스캔해 한도로 막힌 세션을 찾고, 리셋 시각에 새 `claude --resume` 프로세스로 이어갑니다. 세션당 1회(5시간 쿨다운)·세션 사용률 양보 임계 등 **절약 가드**가 들어 있습니다. headless 실행을 위해 macOS 키체인의 Claude OAuth 토큰을 런타임에 읽습니다(소스에 저장 안 함).
