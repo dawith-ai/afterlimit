@@ -42,15 +42,17 @@ CONFIG_FILE = Path.home() / ".config" / "claude-terminal-auto" / "notify.json"
 MENU_COOLDOWN = 120       # 같은 메뉴에 '1' 반복 방지
 CONTINUE_COOLDOWN = 300   # 'continue' 재시도 간격
 NUDGE_COOLDOWN = 900      # keep_going 넛지 간격
+MAX_CONTINUE_TRIES = 3    # 이 횟수 넘게 continue 해도 안 풀리면 포기+알림 (무한 스팸 원천 차단)
 TAIL_CHARS = 700
 BOTTOM_CHARS = 450        # 인라인 한도는 화면 하단만
 SCAN_CHARS = 1400         # reset 시각은 넓게 검색
 
 # (A) 인터랙티브 메뉴 시그니처 (셋 다)
 MENU_SIGNS = ("stop and wait for", "limit to reset", "upgrade your plan")
-# (B) 인라인 한도 메시지 시그니처 (하나라도, 화면 하단에)
+# (B) 인라인 '5시간 세션' 한도 메시지 (하나라도, 화면 하단에)
+# ★ 주간(weekly) 한도는 며칠 뒤 리셋이라 자동재개 불가 → 트리거에서 제외(오작동·스팸 방지)
 INLINE_SIGNS = ("hit your session limit", "hit your usage limit", "session limit · resets",
-                "5-hour limit reached", "weekly limit reached", "usage limit · resets")
+                "5-hour limit reached", "usage limit · resets")
 GENERATING = "esc to interrupt"   # 작업중 신호
 DIAG_SIGNS = ("what do you want to do", "limit to reset", "stop and wait", "hit your session limit",
               "usage limit", "5-hour limit", "weekly limit", "limit reached", "approaching", "resets ")
@@ -240,6 +242,13 @@ def main() -> int:
     state = _load_state()
     waits = state.setdefault("waits", {})
     idle = state.setdefault("idle", {})
+    # 오래된(24h+) 대기 상태 정리 — 누적·좀비 방지
+    for _p in list(waits):
+        try:
+            if (now - datetime.fromisoformat(waits[_p].get("detected_at", ""))).total_seconds() > 86400:
+                waits.pop(_p, None)
+        except Exception:
+            waits.pop(_p, None)
     panes = _tmux("list-panes", "-a", "-F", "#{pane_id}").split()
     for pane in panes:
         content = _tmux("capture-pane", "-t", pane, "-p")
@@ -305,6 +314,15 @@ def main() -> int:
             if st.get("last_try") and not limit_still:      # continue 후 한도표시 사라짐 = 재개됨 → 정리(과다전송 방지)
                 waits.pop(pane, None)
                 continue
+            # ★ 최대 재시도 초과 → 포기+알림 1회 (주간한도·continue 안 먹힘 등 어떤 원인이든 무한 스팸 차단)
+            if st.get("tries", 0) >= MAX_CONTINUE_TRIES:
+                if not st.get("gaveup"):
+                    st["gaveup"] = True
+                    waits[pane] = st
+                    _log(f"  ⚠️ {pane} — continue {MAX_CONTINUE_TRIES}회에도 안 풀림 → 포기. 수동 확인 필요")
+                    _messenger_notify(f"⚠️ Claude {pane} 자동재개 {MAX_CONTINUE_TRIES}회 실패 — 수동 확인 필요"
+                                      f" (주간한도 등일 수 있음)")
+                continue
             reset_at = st.get("reset_at")
             ready = True
             if reset_at:
@@ -317,8 +335,9 @@ def main() -> int:
             if ready and (first or (limit_still and not _cooled(st.get("last_try"), CONTINUE_COOLDOWN, now))):
                 _tmux_send(pane, cont)
                 st["last_try"] = now.isoformat()
+                st["tries"] = st.get("tries", 0) + 1
                 waits[pane] = st
-                _log(f"  ▶️ 리셋 도달 → '{cont}' 전송(재개 시도) — {pane}")
+                _log(f"  ▶️ 리셋 도달 → '{cont}' 전송(재개 시도 {st['tries']}/{MAX_CONTINUE_TRIES}) — {pane}")
                 _messenger_notify(f"⏯ Claude 리셋 도달 — {pane}에 '{cont}' 전송, 이전 작업 재개")
             continue
 
