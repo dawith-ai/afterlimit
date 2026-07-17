@@ -52,20 +52,29 @@ install_bin() {
   command -v claude >/dev/null || info "경고: claude 를 PATH 에서 찾지 못했습니다. 설치는 계속합니다."
 
   mkdir -p "$BIN_DIR" "$STATE_DIR"
+
+  # 표준 설치를 우선하되, 인터넷/pip 이 없어도 동작하도록 폴백을 둔다.
+  if command -v pipx >/dev/null; then
+    pipx install --force "$REPO_DIR" >/dev/null && { info "pipx 로 설치했습니다."; return 0; }
+  fi
+  if python3 -m pip --version >/dev/null 2>&1; then
+    python3 -m pip install --user --quiet "$REPO_DIR" && { info "pip --user 로 설치했습니다."; return 0; }
+  fi
+
+  # 폴백: 의존성이 0 이므로 저장소를 경로에 얹고 얇은 실행 파일만 둔다 (인터넷 불필요)
+  info "pipx/pip 을 쓸 수 없어 오프라인 방식으로 설치합니다."
   cat > "$BIN_DIR/afterlimit" <<EOF
 #!/usr/bin/env bash
 exec python3 -m afterlimit.cli "\$@"
 EOF
   chmod +x "$BIN_DIR/afterlimit"
-
-  # pip 없이도 import 되도록 이 저장소를 사용자 site-packages 경로에 등록한다
   python3 - "$REPO_DIR" <<'PY'
 import pathlib, site, sys
 target = pathlib.Path(site.getusersitepackages())
 target.mkdir(parents=True, exist_ok=True)
 (target / "afterlimit.pth").write_text(sys.argv[1] + "\n")
 PY
-  info "afterlimit 을 $BIN_DIR 에 설치했습니다."
+  info "afterlimit 을 $BIN_DIR 에 설치했습니다 (오프라인)."
 }
 
 install_slash_commands() {

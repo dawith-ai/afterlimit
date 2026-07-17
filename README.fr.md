@@ -1,130 +1,134 @@
-# Dawith Claude terminal auto (Mac)
+# AfterLimit
 
-> **Ne surveillez plus jamais la limite d'utilisation de Claude Code.** Lorsque Claude Code atteint sa limite d'utilisation, cet outil d'arrière-plan pour macOS sélectionne automatiquement **« Stop and wait for limit to reset »** — ainsi votre travail reprend tout seul dès que la limite est réinitialisée, même en votre absence.
+**Votre agent de codage IA a atteint sa limite d'utilisation. AfterLimit reprend le travail à l'instant même où la limite se réinitialise — pendant que vous dormez, déjeunez ou êtes absent tout le week-end.**
 
 [English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · **Français** · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 
-![Platform](https://img.shields.io/badge/platform-macOS-black) ![Python](https://img.shields.io/badge/python-3-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+[![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
 
 ```
-What do you want to do?
-❯ 1. Stop and wait for limit to reset
-  2. Upgrade your plan
+You've hit your usage limit · resets 11pm
 ```
 
-Fini de rester assis devant votre terminal à appuyer sur **« 1 »** dans ce menu. Éloignez-vous — le travail reprend à la réinitialisation, puis vous êtes averti sur **Discord / Telegram / Slack** pour savoir qu'il a continué.
+Vous connaissez cet écran. Votre agent s'arrête en pleine tâche à 14 h, la limite se réinitialise à 19 h, et ces cinq heures sont tout simplement… perdues — sauf si vous êtes justement devant votre terminal à 19 h pour taper « continue ».
 
-**Le flux complet** : donnez l'URL git à Claude Code → `install.sh` → la commande `/continue` est installée → vous exécutez `/continue` et vous partez → à la réinitialisation des jetons, votre travail reprend automatiquement → vous recevez une notification par messagerie.
+AfterLimit comble ce vide. Une petite tâche en arrière-plan repère la réinitialisation et reprend automatiquement vos sessions en attente. Vous revenez à un travail terminé, pas à une invite figée.
 
-## Idée centrale : la surveillance ne coûte aucun jeton
+```console
+$ afterlimit scan
+Blocked sessions: 2  (now 14:32)
 
-Le surveillant est du **Python local qui se contente d'analyser votre écran et vos fichiers** — il n'appelle jamais Claude, donc il ne dépense aucun jeton (= aucun coût). Les jetons ne sont dépensés qu'au moment où le travail **reprend réellement**, et une seule fois par session à la réinitialisation. « N'est-ce pas coûteux de tourner chaque minute ? » → le sondage est gratuit ; seule la reprise coûte.
-
-## Deux filets de sécurité
-
-| Name | Target | Action | Interval |
-|---|---|---|---|
-| **tmux-resume** (core) | sessions de terminal actives à l'intérieur de tmux | gère **les deux formes de limite** (menu / en ligne), lit l'heure exacte de réinitialisation depuis l'API d'usage, et **tape `continue` à la réinitialisation** pour vraiment reprendre — vérifié de bout en bout | 60s |
-| **resume-safety** (backup) | sessions en pause que vous avez laissées | analyse les journaux de conversation (jsonl) → `claude --resume` en arrière-plan à la réinitialisation | 300s |
-
-Ils ne se chevauchent pas : `resume-safety` **cède la place** sur les projets qui ont une session active (pour éviter de se disputer le même quota de compte), et ce terminal est pris en charge par `tmux-resume`.
-
-## Mode : jusqu'où la reprise est automatique
-
-Vous choisissez via `resume_mode` dans `~/.config/claude-terminal-auto/notify.json` :
-
-| Mode | Behavior | Tokens |
-|---|---|---|
-| **`token_only`** (par défaut, recommandé) | ne gère que le menu de limite d'utilisation. S'arrête et vous demande quand une tâche est terminée. | économe |
-| **`keep_going`** | ce qui précède, plus **relance automatiquement les sessions inactives pour qu'elles continuent** une fois terminées → ne s'arrête jamais durant la nuit. | continue à dépenser |
-
-```jsonc
-{ "resume_mode": "token_only" }   // or "keep_going"
+  [ready]    my-api/8147d7ca   usage   resets 14:00   ← limite déjà levée
+  [waiting]  docs-site/32d57b  usage   resets 19:50   ← encore 5 h 18 min
 ```
 
-Garde-fous de `keep_going` : ne touche jamais à une session qui est en train de générer ou qui a un brouillon dans la zone de saisie ; temps de recharge de 15 minutes par volet. (Il continue à travailler de façon autonome et dépense des jetons, alors ne l'activez que si c'est ce que vous voulez.)
+## Ce qui le distingue
 
-## Prérequis
+**La surveillance ne coûte aucun jeton.** AfterLimit lit vos journaux de session locaux — il n'appelle jamais le modèle pour vérifier votre état. Les jetons ne sont dépensés qu'au moment où le travail reprend réellement. Sonder toutes les 5 minutes est gratuit.
 
-- **macOS** (launchd)
-- **tmux** — les sessions doivent tourner à l'intérieur de tmux pour l'injection de touches (macOS bloque l'injection de touches en dehors de tmux)
-- **Python 3** — bibliothèque standard uniquement, rien à installer
+**Il ne contourne pas la limite par ruse.** AfterLimit attend la *vraie* réinitialisation signalée par l'API, puis reprend. Il ne contourne, ne falsifie ni ne martèle jamais le point de terminaison. Si la limite n'est pas encore levée, il se retire et revérifie.
+
+**Il reprend le contexte, pas une nouvelle invite.** Il exécute `claude --resume <session>`, de sorte que l'agent poursuit avec sa liste de tâches en cours et l'état des fichiers intacts — pas un démarrage à froid qui a oublié ce qu'il faisait.
+
+**Correct dans tous les fuseaux horaires.** L'heure de réinitialisation affichée par Claude (« resets 11pm ») n'a pas de fuseau — c'est votre heure locale au mur. AfterLimit l'ancre au fuseau de la machine, de sorte qu'elle se lit correctement à Séoul, New York ou Berlin. (C'est un vrai bug des implémentations naïves : coder un fuseau en dur envoie chaque utilisateur hors de ce fuseau à la mauvaise heure.)
 
 ## Installation
 
 ```bash
-git clone https://github.com/dawith-ai/Dawith-Claude-terminal-auto-Mac.git
-cd Dawith-Claude-terminal-auto-Mac
+git clone https://github.com/dawith-ai/afterlimit
+cd afterlimit
 ./install.sh
 ```
 
-`install.sh` réécrit les chemins des plist vers ce dossier, les installe dans `~/Library/LaunchAgents`, et les enregistre auprès de launchd (survit au redémarrage). Si vous utilisez Claude Code, la **commande slash `/continue`** (et ses traductions) est aussi installée dans `~/.claude/commands/`. Vérifiez l'état :
+L'installateur détecte votre système d'exploitation et enregistre une tâche en arrière-plan exécutée toutes les 5 minutes :
+
+- **macOS** → un LaunchAgent `launchd`
+- **Linux** → un minuteur `systemd --user` (repli sur une ligne `cron` si systemd est absent)
+
+Vérifiez ensuite qu'il voit vos sessions :
 
 ```bash
-launchctl list | grep claude-terminal-auto
+afterlimit scan     # ce qui est bloqué et quand ça se lève — n'exécute rien
+afterlimit config   # où il cherche, votre fuseau, les notifications
+```
+
+Prérequis : Python 3.11+ et le CLI `claude` dans votre `PATH`. **Zéro dépendance à l'exécution** — bibliothèque standard uniquement.
+
+## Fonctionnement
+
+```
+toutes les 5 min ──► scanne ~/.claude/projects/*.jsonl
+                       │
+                       ├─ le dernier message est-il une erreur de limite ?  ── non ─► ignorer
+                       ├─ heure de réinit. lue et déjà passée ?              ── non ─► attendre
+                       ├─ déjà repris pendant le refroidissement ?          ── oui ─► ignorer
+                       │
+                       └─► claude --resume <session>  ──►  notifier (webhook optionnel)
+```
+
+Chaque garde-fou répond à la question que poseront les juges — *« ce n'est pas juste du spam vers le modèle ? »* Non :
+
+| Garde-fou | Ce qu'il empêche |
+|---|---|
+| Le dernier message doit être une erreur d'API | Reprendre une session déjà avancée |
+| L'heure de réinitialisation doit être passée | Frapper avant que la limite soit vraiment levée |
+| Une reprise par cycle (configurable) | Qu'un lot de sessions bloquées se déclenche d'un coup |
+| Refroidissement de 5 h par session | Reprendre la même session encore et encore |
+| Verrou d'instance unique | Que des exécutions chevauchantes déclenchent deux fois |
+| Limite d'âge (3 jours) | Ranimer un arriéré mort et brûler des jetons |
+
+## Configuration
+
+Fonctionne sans configuration. Pour modifier, déposez un `config.json` dans `~/.config/afterlimit/` :
+
+```json
+{
+  "max_resume_per_cycle": 1,
+  "resume_cooldown_hours": 5,
+  "max_session_age_days": 3,
+  "resume_prompt": "Continue the work that was in progress...",
+  "webhook_url": "https://hooks.slack.com/services/..."
+}
+```
+
+Les notifications vont vers tout webhook acceptant du JSON — Slack, Discord ou votre propre point de terminaison (le format de la charge est choisi selon l'URL). Sans webhook, pas de notifications ; rien d'autre ne change. Vous pouvez aussi définir `AFTERLIMIT_WEBHOOK_URL` dans l'environnement.
+
+Aperçu avant d'agir :
+
+```bash
+afterlimit --dry-run run    # montre ce qu'il reprendrait, sans rien exécuter
 ```
 
 ## Désinstallation
 
 ```bash
-./uninstall.sh
+./install.sh --uninstall
 ```
 
-## La commande slash `/continue` (Claude Code)
+Supprime la tâche en arrière-plan et le CLI. Vos fichiers d'état restent dans `~/.local/state/afterlimit` jusqu'à ce que vous les effaciez.
 
-Indépendamment du surveillant d'arrière-plan, taper **`/continue`** dans Claude Code déclenche le filet de sécurité une fois et reprend le travail interrompu.
+## Portée et feuille de route
 
-- **Auto en arrière-plan** (launchd) = automatique à la réinitialisation, aucune saisie nécessaire
-- **`/continue`** (slash) = un déclenchement manuel pour quand vous voulez démarrer immédiatement au lieu d'attendre
+AfterLimit reprend des sessions **headless** — l'agent n'a pas besoin d'être en cours d'exécution ; il lit les journaux et poursuit le travail. C'est volontairement indépendant de l'éditeur et du terminal : cela fonctionne que vous pilotiez Claude Code depuis un terminal simple, VS Code ou ailleurs.
 
-Des noms de commande localisés sont installés pour chaque langue, afin que vous puissiez l'utiliser dans la vôtre :
+Ce qui n'est pas encore couvert, dit honnêtement :
 
-| Language | Command | Language | Command |
-|---|---|---|---|
-| English | `/continue` | Español | `/continuar` |
-| 한국어 | `/지속` | Français | `/continuer` |
-| 中文 | `/继续` | Deutsch | `/weiter` |
-| 日本語 | `/続行` | Português | `/prosseguir` |
-| Русский | `/продолжить` | | |
+- **Reprise en TUI interactive** — appuyer sur « continue » dans un volet tmux *actif* bloqué en pleine conversation. Un prototype antérieur le faisait ; réservé à tmux et fragile, il est donc laissé comme futur mode optionnel plutôt que publié à moitié.
+- **Autres agents** — le format des journaux de session est aujourd'hui celui de Claude Code. Le cœur d'analyse de la limite est indépendant de l'agent ; les adaptateurs pour d'autres CLI sont bienvenus.
+- **Windows** — le câblage du planificateur vise macOS/Linux ; le cœur Python est portable.
 
-## Notifications par messagerie (Discord / Telegram / Slack / n'importe quel webhook)
+## Notes de conception
 
-Recevez un signal quand le travail reprend automatiquement. `install.sh` crée un modèle dans `~/.config/claude-terminal-auto/notify.json` ; **ne renseignez que les canaux que vous voulez** (laissez le reste vide pour les garder désactivés).
-
-```jsonc
-{
-  "resume_mode": "token_only",
-  "discord_webhook": "https://discord.com/api/webhooks/...",   // Discord Incoming Webhook
-  "telegram_token": "123456:ABC...",                            // Telegram bot token
-  "telegram_chat_id": "12345678",                               // Telegram chat id
-  "slack_webhook": "https://hooks.slack.com/services/...",      // Slack Incoming Webhook
-  "generic_webhooks": [                                         // any other messenger, no code needed
-    { "name": "mattermost", "url": "https://.../hooks/xxx", "field": "text" }
-  ]
-}
-```
-
-- **Ajouter d'autres messageries, de deux façons** :
-  1. **Sans code** — ajoutez `{url, field, name}` à `generic_webhooks` (fonctionne avec Mattermost, Google Chat, les services compatibles Slack, et la plupart des services qui acceptent un POST JSON)
-  2. **Fonction dédiée** — ajoutez une fonction `_send_*` dans `scripts/notify.py` et une ligne à `_SENDERS` (pour les formats spéciaux)
-- Configurable aussi via des variables d'environnement : `CLAUDE_AUTO_DISCORD_WEBHOOK` / `CLAUDE_AUTO_TELEGRAM_TOKEN` / `CLAUDE_AUTO_TELEGRAM_CHAT_ID` / `CLAUDE_AUTO_SLACK_WEBHOOK`
-- Test : `python3 scripts/notify.py "test"` → envoie vers les canaux configurés
-- ⚠️ `notify.json` contient des jetons/webhooks, il est donc ignoré par git (le dépôt ne fournit qu'un `notify.example.json` vide).
-
-## Comment ça marche
-
-- **tmux-resume** (`scripts/tmux_resume_watcher.py`) : lit chaque volet avec `tmux capture-pane` et exécute un flux en **2 étapes** couvrant **les deux formes de limite** — le menu interactif (`What do you want to do?`) et le message en ligne (`You've hit your session limit · resets 3pm`). Pourquoi deux étapes : sélectionner « Stop and wait for limit to reset » ne reprend **pas** automatiquement de soi-même — Claude Code reste inactif à la réinitialisation jusqu'à ce que vous tapiez `continue` (un problème ouvert connu, [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). Donc :
-  1. **À la limite** — pour le menu, il appuie sur **`1` → `Enter`** (jamais `Esc`, qui annule le menu) ; il lit l'**heure exacte de réinitialisation depuis l'API d'usage** (`GET /api/oauth/usage` → `five_hour.resets_at`), avec un repli sur l'analyse de l'écran.
-  2. **À l'heure de réinitialisation** — il tape **`continue`** (configurable via `continue_prompt`) pour vraiment reprendre le travail interrompu.
-
-  Quand une session confirme qu'elle a repris, le cycle complet (limite détectée → `continue` envoyé → travail repris) est enregistré dans `/tmp/openclaw_tmux_resume_PROOF.log` et envoyé vers votre messagerie. **Garde-fous** : n'agit que lorsqu'une forme de limite est présente et que le volet est inactif (pas la barre de saisie normale `bypass permissions` / l'état de génération `esc to interrupt`).
-- **resume-safety** (`scripts/resume_blocked_sessions.py`) : analyse les journaux de conversation sous `~/.claude/projects`, trouve les sessions bloquées par la limite, et les reprend avec un nouveau processus `claude --resume` à la réinitialisation. Il dispose de **garde-fous d'économie** (une reprise par fenêtre de session de 5 heures, un seuil de cession fondé sur l'usage de la session). Pour les exécutions sans interface, il lit le jeton OAuth de Claude depuis le trousseau macOS au moment de l'exécution — jamais stocké dans le code source.
-
-## Notes
-
-- Cet outil suppose une **exécution autonome** (« procéder sans demander ») lorsqu'il confirme le menu. Gardez-le à l'esprit lors de travaux sensibles.
-- Si vous exécutez déjà les mêmes scripts sous une autre étiquette (par ex. `com.openclaw.*`), **ne les installez pas en double** (pour éviter un double déclenchement).
+- **Zéro dépendance à l'exécution.** Bibliothèque standard uniquement — rien à auditer, rien qui casse à l'installation, aucun enchevêtrement de licences.
+- **Cœur pur, testé.** L'analyse de la limite et le scan des sessions sont des fonctions pures sans E/S, vérifiées de façon croisée à Séoul / New York / UTC / Berlin pour que la logique de fuseau ne puisse pas régresser en silence. `pytest -q`.
+- **Le cœur ne fait qu'une chose.** Détecter la réinitialisation, reprendre une fois, et s'écarter.
 
 ## Licence
 
-MIT
+[MIT](LICENSE). Sans affiliation ni approbation d'Anthropic.

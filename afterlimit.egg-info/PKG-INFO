@@ -1,3 +1,30 @@
+Metadata-Version: 2.4
+Name: afterlimit
+Version: 0.1.0
+Summary: AI 코딩 에이전트가 사용량 한도로 멈춰도, 풀리면 스스로 작업을 이어가게 한다 (감시 토큰 0)
+Author: dawith
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/dawith-ai/afterlimit
+Project-URL: Repository, https://github.com/dawith-ai/afterlimit
+Project-URL: Issues, https://github.com/dawith-ai/afterlimit/issues
+Keywords: claude,claude-code,ai-agent,usage-limit,automation,resume,rate-limit
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Software Development
+Classifier: Topic :: Utilities
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Dynamic: license-file
+
 # AfterLimit
 
 **Your AI coding agent hit its usage limit. AfterLimit picks the work back up the moment the limit resets — while you're asleep, at lunch, or gone for the weekend.**

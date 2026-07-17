@@ -1,21 +1,55 @@
-[project]
-name = "afterlimit"
-version = "0.1.0"
-description = "AI 코딩 에이전트가 사용량 한도로 멈춰도, 한도가 풀리면 스스로 작업을 이어가게 한다"
-readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.11"
-dependencies = []
-
-[project.urls]
-Homepage = "https://github.com/dawith-ai/afterlimit"
-
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-include = ["afterlimit*"]
+[project]
+name = "afterlimit"
+dynamic = ["version"]
+description = "AI 코딩 에이전트가 사용량 한도로 멈춰도, 풀리면 스스로 작업을 이어가게 한다 (감시 토큰 0)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "dawith" }]
+keywords = ["claude", "claude-code", "ai-agent", "usage-limit", "automation", "resume", "rate-limit"]
+dependencies = []
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/dawith-ai/afterlimit"
+Repository = "https://github.com/dawith-ai/afterlimit"
+Issues = "https://github.com/dawith-ai/afterlimit/issues"
+
+[project.scripts]
+afterlimit = "afterlimit.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["afterlimit"]
+
+[tool.setuptools.dynamic]
+version = { attr = "afterlimit.__version__" }
+
+[tool.setuptools.package-data]
+afterlimit = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

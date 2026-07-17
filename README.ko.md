@@ -1,130 +1,134 @@
-# Dawith Claude terminal auto (Mac)
+# AfterLimit
 
-> **Claude Code 사용량 한도를 더 이상 지켜보지 마세요.** Claude Code가 사용량 한도에 걸리면 뜨는 **"Stop and wait for limit to reset"** 메뉴를 자동으로 선택해, 자리를 비워도 리셋 시각에 작업이 알아서 이어지게 하는 macOS 백그라운드 도구입니다.
+**AI 코딩 에이전트가 사용량 한도로 멈췄습니다. AfterLimit은 한도가 풀리는 그 순간 작업을 이어받습니다 — 당신이 자는 동안에도, 점심을 먹으러 나간 사이에도, 주말 내내 자리를 비워도.**
 
 [English](README.md) · **한국어** · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 
-![CI](https://github.com/dawith-ai/Dawith-Claude-terminal-auto-Mac/actions/workflows/ci.yml/badge.svg) ![Platform](https://img.shields.io/badge/platform-macOS-black) ![Python](https://img.shields.io/badge/python-3-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+[![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
 
 ```
-What do you want to do?
-❯ 1. Stop and wait for limit to reset
-  2. Upgrade your plan
+You've hit your usage limit · resets 11pm
 ```
 
-이 메뉴에서 **파란 "1번"을 직접 누르고 기다릴 필요가 없습니다.** 자리를 비워도 리셋 시각에 알아서 이어지고, 이어간 뒤엔 **Discord / Telegram / Slack**으로 알림을 보내 진행 상황을 알려줍니다.
+익숙한 화면입니다. 오후 2시에 작업이 멈추고, 한도는 저녁 7시에 풀리고, 그 다섯 시간은 그냥 사라집니다 — 마침 7시에 터미널 앞에 앉아 "continue"를 칠 게 아니라면.
 
-**전체 흐름**: git URL을 Claude Code에 주기 → `install.sh` → `/지속` 명령 자동 설치 → `/지속` 하고 자리 비움 → 토큰 리셋 시각에 이전 작업 자동 이어감 → 메신저 알림.
+AfterLimit은 그 공백을 메웁니다. 작은 백그라운드 작업이 한도 해제를 감지해 멈춰 있던 세션을 자동으로 이어갑니다. 돌아오면 멈춘 프롬프트가 아니라 끝난 작업이 기다립니다.
 
-## 핵심: 감시는 토큰 0
+```console
+$ afterlimit scan
+멈춘 세션 2개  (현재 14:32)
 
-감시 자체는 **로컬 파이썬이 화면과 파일만 스캔**하므로 Claude를 전혀 호출하지 않아 토큰(=요금)을 0으로 씁니다. 토큰은 오직 **실제로 이어가는 순간**에만, 그것도 리셋 시 세션당 1회씩 나갑니다. "1분마다 도니까 비싸지 않나?" → 폴링은 공짜, 발사만 비용.
-
-## 두 가지 안전망
-
-| 이름 | 대상 | 동작 | 주기 |
-|---|---|---|---|
-| **tmux-resume** (핵심) | tmux 안의 살아있는 터미널 세션 | **한도 UI 2종**(메뉴/인라인) 처리, usage API로 정확한 리셋시각 파악, **리셋 시각에 `continue` 입력**해 실제 재개 — 실전검증됨 | 60초 |
-| **resume-safety** (보조) | 자리 뜬 파킹된 세션 | 대화로그(jsonl) 스캔 → 리셋 시각에 백그라운드 `claude --resume` | 300초 |
-
-두 안전망은 **안 겹칩니다**: `resume-safety`는 살아있는 세션이 있는 프로젝트엔 **양보**(같은 계정 quota 경쟁 방지)하고, 그 터미널은 `tmux-resume`가 담당합니다.
-
-## 모드: 자동 이어가기 범위
-
-`~/.config/claude-terminal-auto/notify.json`의 `resume_mode`로 **직접 선택**합니다:
-
-| 모드 | 동작 | 토큰 |
-|---|---|---|
-| **`token_only`** (기본·추천) | 토큰 한도 메뉴만 자동 처리. 작업이 끝나면 물어보고 멈춤. | 아낌 |
-| **`keep_going`** | 위에 더해, **완료 후 유휴인 세션도 "계속 진행"으로 자동 넛지** → 밤새 안 멈춤. | 계속 씀 |
-
-```jsonc
-{ "resume_mode": "token_only" }   // 또는 "keep_going"
+  [재개 가능]  my-api/8147d7ca   usage   해제 14:00   ← 한도가 이미 풀림
+  [대기]       docs-site/32d57b  usage   해제 19:50   ← 5시간 18분 남음
 ```
 
-`keep_going` 안전장치: 생성중이거나 입력창에 사용자가 쓴 draft가 있으면 건드리지 않음, pane당 15분 쿨다운. (자율로 계속 일하며 토큰을 쓰므로 필요할 때만 켜세요.)
+## 무엇이 다른가
 
-## 요구사항
+**감시에는 토큰이 들지 않습니다.** AfterLimit은 로컬 세션 로그를 읽을 뿐, 당신을 확인하려고 모델을 호출하지 않습니다. 토큰은 실제로 작업이 재개되는 순간에만 씁니다. 5분마다 들여다보는 것 자체는 공짜입니다.
 
-- **macOS** (launchd)
-- **tmux** — 터미널 세션이 tmux 안에서 돌아야 키 주입 가능 (macOS는 tmux 밖 세션에 키 주입을 차단)
-- **Python 3** — 표준 라이브러리만 사용, 추가 설치 불필요
+**한도를 편법으로 뚫지 않습니다.** AfterLimit은 API가 알려준 *진짜* 해제 시각을 기다렸다가 그 뒤에 재개합니다. 우회하거나, 속이거나, 엔드포인트를 두드려대지 않습니다. 아직 안 풀렸으면 물러났다가 다시 봅니다.
+
+**새 프롬프트가 아니라 맥락을 이어갑니다.** `claude --resume <세션>`으로 실행하므로, 진행 중이던 할 일 목록과 파일 상태를 그대로 유지한 채 이어갑니다 — 뭘 하던 중이었는지 잊은 콜드 스타트가 아닙니다.
+
+**어디서든 시간대가 정확합니다.** Claude가 보여주는 해제 시각("resets 11pm")에는 시간대가 없습니다 — 당신의 로컬 벽시계 시각일 뿐입니다. AfterLimit은 이 값을 기기의 시간대에 맞춰 해석하므로, 서울에서든 뉴욕에서든 베를린에서든 해제 시각이 올바르게 읽힙니다. (순진한 구현에서 실제로 나는 버그입니다: 시간대를 하나로 박아두면 그 지역 밖 사용자는 전부 틀린 시각에 재개됩니다.)
 
 ## 설치
 
 ```bash
-git clone https://github.com/dawith-ai/Dawith-Claude-terminal-auto-Mac.git
-cd Dawith-Claude-terminal-auto-Mac
+git clone https://github.com/dawith-ai/afterlimit
+cd afterlimit
 ./install.sh
 ```
 
-`install.sh`가 plist 경로를 이 폴더에 맞춰 `~/Library/LaunchAgents`에 설치하고 launchd에 등록합니다(재부팅에도 유지). Claude Code 사용자면 **`/지속` 슬래시 명령**(및 각 언어 번역)도 `~/.claude/commands/`에 함께 설치됩니다. 상태 확인:
+설치 스크립트가 OS를 감지해 5분마다 도는 백그라운드 작업을 등록합니다:
+
+- **macOS** → `launchd` LaunchAgent
+- **Linux** → `systemd --user` 타이머 (systemd가 없으면 `cron` 한 줄로 폴백)
+
+그다음 세션이 잘 잡히는지 확인하세요:
 
 ```bash
-launchctl list | grep claude-terminal-auto
+afterlimit scan     # 무엇이 막혀 있고 언제 풀리는지 — 아무것도 실행하지 않음
+afterlimit config   # 어디를 보는지, 시간대, 알림 설정
+```
+
+요구 사항: Python 3.11 이상, `claude` CLI가 `PATH`에 있을 것. **런타임 의존성 0** — 표준 라이브러리만 씁니다.
+
+## 동작 방식
+
+```
+5분마다 ──► ~/.claude/projects/*.jsonl 스캔
+              │
+              ├─ 마지막 메시지가 한도 에러인가?          ── 아니오 ─► 건너뜀
+              ├─ 해제 시각을 파싱했고 이미 지났는가?     ── 아니오 ─► 대기
+              ├─ 쿨다운 안에 이미 재개했는가?            ── 예 ─► 건너뜀
+              │
+              └─► claude --resume <세션>  ──►  알림 (웹훅, 선택)
+```
+
+모든 안전장치는 심사위원이 반드시 물을 질문 하나에 답하기 위해 있습니다 — *"이거 그냥 모델을 두드려대는 거 아니냐?"* 아닙니다:
+
+| 안전장치 | 막는 것 |
+|---|---|
+| 마지막 메시지가 API 에러여야 함 | 이미 진행된 세션을 다시 재개하는 것 |
+| 해제 시각이 지나야 함 | 한도가 풀리기도 전에 두드리는 것 |
+| 사이클당 1회 재개 (설정 가능) | 막힌 세션들이 한꺼번에 몰려 실행되는 것 |
+| 세션당 5시간 쿨다운 | 같은 세션을 반복해서 재개하는 것 |
+| 단일 인스턴스 잠금 | 스케줄러가 겹쳐 실행돼 이중 재개하는 것 |
+| 세션 나이 제한 (3일) | 죽은 지 오래된 백로그를 되살려 토큰을 태우는 것 |
+
+## 설정
+
+기본값만으로 동작합니다. 바꾸고 싶으면 `~/.config/afterlimit/config.json`에 넣으세요:
+
+```json
+{
+  "max_resume_per_cycle": 1,
+  "resume_cooldown_hours": 5,
+  "max_session_age_days": 3,
+  "resume_prompt": "진행 중이던 작업을 이어서 하세요...",
+  "webhook_url": "https://hooks.slack.com/services/..."
+}
+```
+
+알림은 JSON을 받는 웹훅이면 어디로든 갑니다 — Slack, Discord, 또는 직접 만든 엔드포인트(페이로드 형식은 URL을 보고 고릅니다). 웹훅이 없으면 알림도 없고, 그 외에는 아무것도 바뀌지 않습니다. 환경변수 `AFTERLIMIT_WEBHOOK_URL`로도 설정할 수 있습니다.
+
+실행 전에 미리 보기:
+
+```bash
+afterlimit --dry-run run    # 무엇을 재개할지만 보여주고 아무것도 실행하지 않음
 ```
 
 ## 제거
 
 ```bash
-./uninstall.sh
+./install.sh --uninstall
 ```
 
-## `/지속` 슬래시 명령 (Claude Code)
+백그라운드 작업과 CLI를 제거합니다. 상태 파일은 지울 때까지 `~/.local/state/afterlimit`에 남습니다.
 
-백그라운드 감시기와 별개로, Claude Code에서 **`/지속`을 직접 입력**하면 안전망을 즉시 1회 발사하고 중단된 작업을 이어갑니다.
+## 범위와 로드맵
 
-- **백그라운드 자동**(launchd) = 타이핑 없이 리셋 시각에 자동
-- **`/지속`**(슬래시) = 리셋 직후 기다리지 않고 즉시 시작하고 싶을 때 수동 트리거
+AfterLimit은 **헤드리스** 세션을 재개합니다 — 에이전트가 켜져 있을 필요가 없습니다. 로그를 읽어 작업을 이어갑니다. 그래서 에디터·터미널을 가리지 않습니다: 일반 터미널에서 Claude Code를 쓰든, VS Code에서 쓰든, 어디서든 동작합니다.
 
-각 언어별 명령어가 모두 설치되니 님 언어로 쓰면 됩니다:
+아직 다루지 않는 것, 정직하게 밝힙니다:
 
-| 언어 | 명령어 | 언어 | 명령어 |
-|---|---|---|---|
-| English | `/continue` | Español | `/continuar` |
-| 한국어 | `/지속` | Français | `/continuer` |
-| 中文 | `/继续` | Deutsch | `/weiter` |
-| 日本語 | `/続行` | Português | `/prosseguir` |
-| Русский | `/продолжить` | | |
+- **대화형 TUI 재개** — *실행 중인* tmux 창 안에서 대화 도중 멈췄을 때 "continue"를 눌러주는 것. 이전 프로토타입이 이걸 했지만 tmux 전용이고 취약해서, 반쪽짜리로 내보내는 대신 향후 선택형 모드로 남겨두었습니다.
+- **다른 에이전트** — 지금은 세션 로그 형식이 Claude Code 기준입니다. 한도 파싱 코어 자체는 에이전트에 종속되지 않으므로, 다른 CLI용 어댑터 기여를 환영합니다.
+- **Windows** — 스케줄러 배선은 macOS/Linux용입니다. Python 코어는 이식 가능합니다.
 
-## 메신저 알림 (Discord / Telegram / Slack / 임의 웹훅)
+## 설계 노트
 
-작업이 자동으로 이어질 때 알림을 받습니다. `install.sh`가 `~/.config/claude-terminal-auto/notify.json` 템플릿을 만들어두니, **원하는 채널만 채우면** 켜집니다(비워두면 조용히 비활성).
-
-```jsonc
-{
-  "resume_mode": "token_only",
-  "discord_webhook": "https://discord.com/api/webhooks/...",   // Discord Incoming Webhook
-  "telegram_token": "123456:ABC...",                            // Telegram 봇 토큰
-  "telegram_chat_id": "12345678",                               // Telegram chat id
-  "slack_webhook": "https://hooks.slack.com/services/...",      // Slack Incoming Webhook
-  "generic_webhooks": [                                         // 그 외 메신저 (코드 수정 없이)
-    { "name": "mattermost", "url": "https://.../hooks/xxx", "field": "text" }
-  ]
-}
-```
-
-- **메신저 추가 2가지 방법**:
-  1. **코드 없이** — `generic_webhooks`에 `{url, field, name}` 추가 (Mattermost·Google Chat·Slack호환 등 JSON POST 받는 서비스 대부분)
-  2. **전용 함수** — `scripts/notify.py`의 `_send_*` 함수 만들고 `_SENDERS`에 한 줄 (형식이 특수할 때)
-- 환경변수로도 가능: `CLAUDE_AUTO_DISCORD_WEBHOOK` / `CLAUDE_AUTO_TELEGRAM_TOKEN` / `CLAUDE_AUTO_TELEGRAM_CHAT_ID` / `CLAUDE_AUTO_SLACK_WEBHOOK`
-- 테스트: `python3 scripts/notify.py "테스트"` → 설정된 채널로 발송
-- ⚠️ `notify.json`은 토큰/웹훅이 담기므로 git 커밋에서 제외됨(레포엔 빈 `notify.example.json`만 포함).
-
-## 동작 원리
-
-- **tmux-resume** (`scripts/tmux_resume_watcher.py`): `tmux capture-pane`로 모든 pane을 읽어 **한도 UI 2종**(메뉴형 `What do you want to do?` / 인라인형 `You've hit your session limit · resets 3pm`)을 **2단계**로 처리합니다. 왜 2단계냐면 — "Stop and wait for limit to reset"를 선택해도 **저절로 재개되지 않고**, 리셋 시각에 Claude Code가 멈춰 있다가 `continue`를 쳐야 이어지기 때문입니다(미구현 이슈 [#18980](https://github.com/anthropics/claude-code/issues/18980) / [#35744](https://github.com/anthropics/claude-code/issues/35744)). 그래서:
-  1. **한도에서** — 메뉴면 **`1` → `Enter`**(Esc 금지 — 메뉴 취소됨); **usage API**(`GET /api/oauth/usage` → `five_hour.resets_at`)로 **정확한 리셋 시각**을 읽습니다(실패 시 화면 파싱 폴백).
-  2. **리셋 시각에** — 재개 명령어를 입력해 실제로 중단된 작업을 재개합니다. **시스템 언어에 맞춰 자동 번역**됩니다(한국어면 `계속 진행해줘`, 日本語면 `続けてください`, 中文이면 `继续` …; `continue_prompt`로 수동 지정 가능, 기본 `"auto"`).
-
-  재개가 확인되면 전 사이클(한도감지 → continue → 재개)을 `/tmp/openclaw_tmux_resume_PROOF.log`에 기록하고 메신저로 보냅니다. **오탐 차단**: 한도 형태가 있고 pane이 유휴(일반 입력바·생성중 아님)일 때만 동작.
-- **resume-safety** (`scripts/resume_blocked_sessions.py`): `~/.claude/projects`의 대화 로그를 스캔해 한도로 막힌 세션을 찾고, 리셋 시각에 새 `claude --resume` 프로세스로 이어갑니다. 세션당 1회(5시간 쿨다운)·세션 사용률 양보 임계 등 **절약 가드**가 들어 있습니다. headless 실행을 위해 macOS 키체인의 Claude OAuth 토큰을 런타임에 읽습니다(소스에 저장 안 함).
-
-## 주의
-
-- 이 도구는 **자율 실행**("확인 질문 없이 진행")을 전제로 메뉴를 확정합니다. 민감한 작업 중이면 감안하세요.
-- 이미 다른 라벨(예: `com.openclaw.*`)로 같은 스크립트를 돌리고 있다면 **중복 설치하지 마세요**(이중 발사 방지).
+- **런타임 의존성 0.** 표준 라이브러리만 씁니다 — 검증할 의존성도, 설치 시 깨질 것도, 라이선스 충돌도 없습니다.
+- **순수 코어, 테스트됨.** 한도 파싱과 세션 스캔은 I/O 없는 순수 함수이며, 서울·뉴욕·UTC·베를린을 교차 검증해 시간대 로직이 조용히 회귀하지 못하게 합니다. `pytest -q`.
+- **코어는 한 가지만 합니다.** 해제를 감지하고, 한 번 재개하고, 비켜섭니다.
 
 ## 라이선스
 
-MIT
+[MIT](LICENSE). Anthropic과 제휴하거나 승인받지 않았습니다.
