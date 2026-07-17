@@ -129,6 +129,10 @@ AfterLimit은 **헤드리스** 세션을 재개합니다 — 에이전트가 켜
 - **순수 코어, 테스트됨.** 한도 파싱과 세션 스캔은 I/O 없는 순수 함수이며, 서울·뉴욕·UTC·베를린을 교차 검증해 시간대 로직이 조용히 회귀하지 못하게 합니다. `pytest -q`.
 - **코어는 한 가지만 합니다.** 해제를 감지하고, 한 번 재개하고, 비켜섭니다.
 
+## 더 큰 키트의 일부
+
+AfterLimit은 Claude Code 에이전트를 무인 운영하기 위한 [claude-ops](https://github.com/dawith-ai/claude-ops) 키트의 도구 하나로, [recall](https://github.com/dawith-ai/recall)(과거 세션 검색)·[guard](https://github.com/dawith-ai/guard)(같은 실수 반복 방지)과 함께합니다.
+
 ## 라이선스
 
 [MIT](LICENSE). Anthropic과 제휴하거나 승인받지 않았습니다.

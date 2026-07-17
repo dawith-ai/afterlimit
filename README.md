@@ -129,6 +129,10 @@ Not yet handled, and honestly noted:
 - **Pure core, tested.** Limit parsing and session scanning are pure functions with no I/O, cross-checked across Seoul / New York / UTC / Berlin so the timezone logic can't silently regress. `pytest -q`.
 - **The core does one thing.** Detect the reset, resume once, get out of the way.
 
+## Part of a larger kit
+
+AfterLimit is one tool in [claude-ops](https://github.com/dawith-ai/claude-ops), a set for running Claude Code agents unattended, alongside [recall](https://github.com/dawith-ai/recall) (search your past sessions) and [guard](https://github.com/dawith-ai/guard) (don't repeat past mistakes).
+
 ## License
 
 [MIT](LICENSE). Not affiliated with or endorsed by Anthropic.
