@@ -31,3 +31,40 @@ jobs:
         run: afterlimit --version
       - name: Run tests
         run: pytest -q tests/
+
+  linux-install:
+    # 실제 Linux 에서 설치 경로와 systemd 유닛이 진짜로 유효한지 증명한다.
+    # 이 Mac 에는 Linux VM 이 없으므로, 재현 가능한 이 잡이 곧 리눅스 실기기 검증이다.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install to ~/.local/bin (systemd 유닛의 ExecStart 경로와 일치)
+        run: |
+          python -m pip install --user .
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: CLI 가 실제 Linux 에서 동작하는가
+        run: |
+          afterlimit --version
+          afterlimit config
+          afterlimit scan            # 세션이 없어도 정상 종료해야 한다
+          afterlimit --dry-run run   # 아무것도 실행하지 않고 계획만
+
+      - name: systemd 유닛 파일을 systemd 자신이 검증
+        run: |
+          # %h 지정자를 실제 홈으로 치환해 로컬 유닛으로 검증한다
+          mkdir -p ~/.config/systemd/user
+          sed "s|%h|$HOME|g" packaging/systemd/afterlimit.service > ~/.config/systemd/user/afterlimit.service
+          cp packaging/systemd/afterlimit.timer ~/.config/systemd/user/afterlimit.timer
+          systemd-analyze verify ~/.config/systemd/user/afterlimit.service
+          systemd-analyze verify ~/.config/systemd/user/afterlimit.timer
+          echo "✅ systemd 가 두 유닛을 유효한 것으로 확인"
+
+      - name: install.sh shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck install.sh
