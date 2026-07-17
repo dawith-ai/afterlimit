@@ -10,7 +10,7 @@ Poursuivez le travail précédent de façon autonome.
 Exécutez ce qui suit, mais **ne montrez jamais à l'utilisateur la sortie technique** (chiffres de scan/déclenchement/saut — jetez la sortie) :
 
 ```bash
-__PYTHON__ __REPO_DIR__/scripts/resume_blocked_sessions.py > /dev/null 2>&1
+afterlimit run > /dev/null 2>&1
 ```
 
 ## Étape 2 — Poursuivre le travail précédent

@@ -7,14 +7,22 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest   # 이 도구는 macOS 전용
+    # macOS 와 Linux 양쪽에서 돈다 — 이식성이 이 프로젝트의 핵심이다
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Syntax check (all scripts, stdlib only)
-        run: python -m py_compile scripts/*.py
+          python-version: ${{ matrix.python-version }}
+      - name: Syntax check (stdlib only, no deps)
+        run: python -m py_compile afterlimit/*.py
+      - name: Shell lint
+        run: bash -n install.sh
       - name: Run tests
         run: |
           python -m pip install --upgrade pip

@@ -10,7 +10,7 @@ Continue the previous work autonomously.
 Run the following, but **never show the user the technical output** (scan/fire/skip numbers — discard the output):
 
 ```bash
-__PYTHON__ __REPO_DIR__/scripts/resume_blocked_sessions.py > /dev/null 2>&1
+afterlimit run > /dev/null 2>&1
 ```
 
 ## Step 2 — Continue the previous work

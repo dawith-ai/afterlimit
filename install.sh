@@ -37,6 +37,9 @@ uninstall() {
       ;;
   esac
   rm -f "$BIN_DIR/afterlimit"
+  for cmd in "$REPO_DIR"/commands/*.md; do
+    [[ -e "$cmd" ]] && rm -f "$HOME/.claude/commands/$(basename "$cmd")"
+  done
   echo
   echo "제거했습니다. 상태 파일은 남아 있습니다: $STATE_DIR"
   echo "완전히 지우려면: rm -rf $STATE_DIR"
@@ -63,6 +66,20 @@ target.mkdir(parents=True, exist_ok=True)
 (target / "afterlimit.pth").write_text(sys.argv[1] + "\n")
 PY
   info "afterlimit 을 $BIN_DIR 에 설치했습니다."
+}
+
+install_slash_commands() {
+  # Claude Code 사용자용 슬래시 명령(/continue, /지속 …). 없으면 조용히 넘어간다.
+  local cmd_dir="$HOME/.claude/commands"
+  [[ -d "$REPO_DIR/commands" ]] || return 0
+  mkdir -p "$cmd_dir"
+  local n=0
+  for cmd in "$REPO_DIR"/commands/*.md; do
+    [[ -e "$cmd" ]] || continue
+    cp "$cmd" "$cmd_dir/"
+    n=$((n + 1))
+  done
+  info "슬래시 명령 ${n}개를 $cmd_dir 에 설치했습니다."
 }
 
 install_macos() {
@@ -97,6 +114,7 @@ main() {
   local os; os="$(detect_os)"
   echo "AfterLimit 설치 ($os)"
   install_bin
+  install_slash_commands
   case "$os" in
     macos) install_macos ;;
     linux) install_linux ;;

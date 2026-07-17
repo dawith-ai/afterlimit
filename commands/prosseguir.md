@@ -10,7 +10,7 @@ Continue o trabalho anterior de forma autônoma.
 Execute o seguinte, mas **nunca mostre ao usuário a saída técnica** (números de varredura/disparo/pulo — descarte a saída):
 
 ```bash
-__PYTHON__ __REPO_DIR__/scripts/resume_blocked_sessions.py > /dev/null 2>&1
+afterlimit run > /dev/null 2>&1
 ```
 
 ## Passo 2 — Continuar o trabalho anterior
