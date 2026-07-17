@@ -15,5 +15,9 @@ afterlimit.egg-info/dependency_links.txt
 afterlimit.egg-info/entry_points.txt
 afterlimit.egg-info/requires.txt
 afterlimit.egg-info/top_level.txt
+tests/test_cli.py
+tests/test_config.py
 tests/test_limits.py
+tests/test_notify.py
+tests/test_resume.py
 tests/test_sessions.py
