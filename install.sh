@@ -1,54 +1,114 @@
 #!/usr/bin/env bash
-# claude-terminal-auto 설치: plist 경로를 이 폴더로 맞춰 launchd에 등록.
+# AfterLimit 설치 — macOS(launchd) 와 Linux(systemd) 를 모두 지원한다.
+#
+#   ./install.sh             설치 (5분마다 실행)
+#   ./install.sh --uninstall 제거
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON="$(command -v python3 || true)"
-LA="$HOME/Library/LaunchAgents"
-UID_NUM="$(id -u)"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/afterlimit"
+BIN_DIR="$HOME/.local/bin"
+LAUNCH_AGENT="$HOME/Library/LaunchAgents/io.afterlimit.run.plist"
+SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
-if [ -z "$PYTHON" ]; then echo "❌ python3 를 찾을 수 없습니다"; exit 1; fi
-if ! command -v tmux >/dev/null 2>&1; then
-  echo "⚠️  tmux 미설치 — tmux-resume는 tmux 세션에만 동작합니다 (brew install tmux)"
-fi
+die()  { echo "오류: $*" >&2; exit 1; }
+info() { echo "  $*"; }
 
-mkdir -p "$LA"
+detect_os() {
+  case "$(uname -s)" in
+    Darwin) echo macos ;;
+    Linux)  echo linux ;;
+    *) die "지원하지 않는 OS: $(uname -s) (macOS 와 Linux 만 지원합니다)" ;;
+  esac
+}
 
-for label in tmux-resume resume-safety; do
-  src="$REPO_DIR/launchd/com.claude-terminal-auto.$label.plist"
-  dst="$LA/com.claude-terminal-auto.$label.plist"
-  sed -e "s|__REPO_DIR__|$REPO_DIR|g" \
-      -e "s|__PYTHON__|$PYTHON|g" \
-      -e "s|__HOME__|$HOME|g" \
-      "$src" > "$dst"
-  launchctl enable  "gui/$UID_NUM/com.claude-terminal-auto.$label" 2>/dev/null || true
-  launchctl bootout "gui/$UID_NUM/com.claude-terminal-auto.$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$UID_NUM" "$dst"
-  echo "✅ 설치: com.claude-terminal-auto.$label"
-done
+uninstall() {
+  case "$(detect_os)" in
+    macos)
+      launchctl bootout "gui/$(id -u)/io.afterlimit.run" 2>/dev/null || true
+      rm -f "$LAUNCH_AGENT"
+      info "launchd 에이전트를 제거했습니다."
+      ;;
+    linux)
+      systemctl --user disable --now afterlimit.timer 2>/dev/null || true
+      rm -f "$SYSTEMD_DIR/afterlimit.service" "$SYSTEMD_DIR/afterlimit.timer"
+      systemctl --user daemon-reload 2>/dev/null || true
+      info "systemd 타이머를 제거했습니다."
+      ;;
+  esac
+  rm -f "$BIN_DIR/afterlimit"
+  echo
+  echo "제거했습니다. 상태 파일은 남아 있습니다: $STATE_DIR"
+  echo "완전히 지우려면: rm -rf $STATE_DIR"
+}
 
-# 메신저 알림 설정 템플릿 (Discord/Telegram/Slack/임의 웹훅) — 채우면 재개 시 알림
-CFG_DIR="$HOME/.config/claude-terminal-auto"
-mkdir -p "$CFG_DIR"
-if [ ! -f "$CFG_DIR/notify.json" ] && [ -f "$REPO_DIR/notify.example.json" ]; then
-  cp "$REPO_DIR/notify.example.json" "$CFG_DIR/notify.json"
-  echo "📨 알림 설정 템플릿 생성: $CFG_DIR/notify.json (webhook/토큰 채우면 알림 켜짐)"
-fi
+install_bin() {
+  command -v python3 >/dev/null || die "python3 가 필요합니다."
+  python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+    || die "Python 3.11 이상이 필요합니다."
+  command -v claude >/dev/null || info "경고: claude 를 PATH 에서 찾지 못했습니다. 설치는 계속합니다."
 
-# 슬래시 명령 설치 (Claude Code 사용자용 — 각 언어별 /continue /지속 /继续 /続行 …)
-CMD_DIR="$HOME/.claude/commands"
-if [ -d "$REPO_DIR/commands" ]; then
-  mkdir -p "$CMD_DIR"
-  n=0
-  for cmd in "$REPO_DIR"/commands/*.md; do
-    [ -e "$cmd" ] || continue
-    sed -e "s|__REPO_DIR__|$REPO_DIR|g" \
-        -e "s|__PYTHON__|$PYTHON|g" \
-        "$cmd" > "$CMD_DIR/$(basename "$cmd")"
-    n=$((n + 1))
-  done
-  echo "✅ 설치: 각 언어 슬래시 명령 ${n}개 (→ ~/.claude/commands/)"
-fi
+  mkdir -p "$BIN_DIR" "$STATE_DIR"
+  cat > "$BIN_DIR/afterlimit" <<EOF
+#!/usr/bin/env bash
+exec python3 -m afterlimit.cli "\$@"
+EOF
+  chmod +x "$BIN_DIR/afterlimit"
 
-echo ""
-echo "완료. 상태 확인:  launchctl list | grep claude-terminal-auto"
+  # pip 없이도 import 되도록 이 저장소를 사용자 site-packages 경로에 등록한다
+  python3 - "$REPO_DIR" <<'PY'
+import pathlib, site, sys
+target = pathlib.Path(site.getusersitepackages())
+target.mkdir(parents=True, exist_ok=True)
+(target / "afterlimit.pth").write_text(sys.argv[1] + "\n")
+PY
+  info "afterlimit 을 $BIN_DIR 에 설치했습니다."
+}
+
+install_macos() {
+  mkdir -p "$(dirname "$LAUNCH_AGENT")"
+  sed -e "s|__AFTERLIMIT_BIN__|$BIN_DIR/afterlimit|g" \
+      -e "s|__STATE_DIR__|$STATE_DIR|g" \
+      -e "s|__PATH__|$BIN_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin|g" \
+      "$REPO_DIR/packaging/launchd/io.afterlimit.run.plist" > "$LAUNCH_AGENT"
+
+  launchctl bootout "gui/$(id -u)/io.afterlimit.run" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT"
+  info "launchd 에 등록했습니다 (5분 간격)."
+}
+
+install_linux() {
+  command -v systemctl >/dev/null \
+    || die "systemd 가 없습니다. cron 에 다음을 등록하세요: */5 * * * * $BIN_DIR/afterlimit run"
+  mkdir -p "$SYSTEMD_DIR"
+  cp "$REPO_DIR/packaging/systemd/afterlimit.service" "$SYSTEMD_DIR/"
+  cp "$REPO_DIR/packaging/systemd/afterlimit.timer"   "$SYSTEMD_DIR/"
+  systemctl --user daemon-reload
+  systemctl --user enable --now afterlimit.timer
+  info "systemd 타이머를 등록했습니다 (5분 간격)."
+  # 로그아웃 후에도 타이머가 돌게 한다. 권한이 없으면 안내만 한다.
+  loginctl enable-linger "$USER" 2>/dev/null \
+    || info "참고: 'loginctl enable-linger $USER' 를 실행하면 로그아웃 후에도 동작합니다."
+}
+
+main() {
+  [[ "${1:-}" == "--uninstall" ]] && { uninstall; exit 0; }
+
+  local os; os="$(detect_os)"
+  echo "AfterLimit 설치 ($os)"
+  install_bin
+  case "$os" in
+    macos) install_macos ;;
+    linux) install_linux ;;
+  esac
+
+  echo
+  echo "완료했습니다. 확인해 보세요:"
+  echo "  afterlimit scan     막힌 세션과 해제 시각"
+  echo "  afterlimit config   현재 설정"
+  echo
+  echo "알림을 받으려면 웹훅 URL 을 넣으세요 (Discord·Slack 등):"
+  echo "  export AFTERLIMIT_WEBHOOK_URL='https://...'"
+}
+
+main "$@"

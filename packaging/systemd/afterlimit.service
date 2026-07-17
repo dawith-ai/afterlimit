@@ -1,0 +1,14 @@
+[Unit]
+Description=AfterLimit — resume AI coding agents when the usage limit resets
+Documentation=https://github.com/dawith-ai/afterlimit
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/afterlimit run
+# 재개 1회는 최대 15분까지 걸릴 수 있다 (invoke_timeout_sec 기본값)
+TimeoutStartSec=1200
+# claude 는 사용자 홈의 인증 정보를 읽는다. 사용자 서비스로 돌려야 한다.
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal

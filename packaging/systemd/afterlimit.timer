@@ -1,0 +1,14 @@
+[Unit]
+Description=Run AfterLimit every 5 minutes
+Documentation=https://github.com/dawith-ai/afterlimit
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+# 여러 대에서 동시에 깨어나지 않게 살짝 흩뜨린다
+RandomizedDelaySec=30
+Persistent=true
+Unit=afterlimit.service
+
+[Install]
+WantedBy=timers.target

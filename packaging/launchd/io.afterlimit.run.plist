@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.afterlimit.run</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AFTERLIMIT_BIN__</string>
+        <string>run</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- claude 는 사용자 홈의 인증 정보를 읽는다. PATH 에 실행 파일이 잡혀야 한다. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__PATH__</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/launchd.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
