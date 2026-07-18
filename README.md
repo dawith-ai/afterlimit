@@ -5,7 +5,7 @@
 **English** · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 
 [![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -50,6 +50,12 @@ The installer detects your OS and registers a background job that runs every 5 m
 
 - **macOS** → a `launchd` LaunchAgent
 - **Linux** → a `systemd --user` timer (falls back to a `cron` line if systemd is absent)
+
+On **Windows**, run the PowerShell installer instead — it registers a Task Scheduler job:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
 
 Then check it's seeing your sessions:
 
@@ -121,7 +127,7 @@ Not yet handled, and honestly noted:
 
 - **Interactive TUI resume** — pressing "continue" inside a *live* tmux pane that's blocked mid-conversation. A previous prototype did this; it's tmux-only and fragile, so it's left for a future opt-in mode rather than shipped half-working.
 - **Other agents** — the session-log format is Claude Code's today. The limit-parsing core is agent-agnostic; adapters for other CLIs are welcome.
-- **Windows** — the scheduler wiring is macOS/Linux; the Python core is portable.
+- **Windows scheduler** — `install.ps1` registers a Task Scheduler job; the CLI and tests run on Windows in CI. The Task Scheduler *firing* on a live desktop is the one thing CI can't prove — verify with `Get-ScheduledTask AfterLimit`.
 
 ## Design notes
 

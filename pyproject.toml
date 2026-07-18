@@ -36,7 +36,9 @@ Issues = "https://github.com/dawith-ai/afterlimit/issues"
 afterlimit = "afterlimit.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# tzdata: 런타임엔 불필요(로컬 시간대 사용). Windows 는 시스템 tz DB 가 없어
+# 시간대 테스트(ZoneInfo)에만 필요하다. 런타임 의존성은 여전히 0.
+dev = ["pytest>=8", "tzdata; platform_system == 'Windows'"]
 
 [tool.setuptools]
 packages = ["afterlimit"]
