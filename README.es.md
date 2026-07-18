@@ -2,7 +2,7 @@
 
 **Tu agente de codificación con IA alcanzó su límite de uso. AfterLimit retoma el trabajo en el instante en que el límite se restablece — mientras duermes, almuerzas o estás fuera todo el fin de semana.**
 
-[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · **Español** · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
+[English](README.en.md) · [한국어](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · **Español** · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 
 [![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)

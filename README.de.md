@@ -2,7 +2,7 @@
 
 **Dein KI-Coding-Agent hat sein Nutzungslimit erreicht. AfterLimit nimmt die Arbeit in dem Moment wieder auf, in dem das Limit zurückgesetzt wird — während du schläfst, beim Mittagessen bist oder das ganze Wochenende weg bist.**
 
-[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · **Deutsch** · [Português](README.pt.md) · [Русский](README.ru.md)
+[English](README.en.md) · [한국어](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · **Deutsch** · [Português](README.pt.md) · [Русский](README.ru.md)
 
 [![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)

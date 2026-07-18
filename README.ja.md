@@ -2,7 +2,7 @@
 
 **AI コーディングエージェントが使用量上限で止まりました。AfterLimit は上限がリセットされたその瞬間に作業を引き継ぎます——あなたが寝ている間も、昼食に出ている間も、週末ずっと不在でも。**
 
-[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語** · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
+[English](README.en.md) · [한국어](README.md) · [中文](README.zh.md) · **日本語** · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 
 [![CI](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml/badge.svg)](https://github.com/dawith-ai/afterlimit/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)
