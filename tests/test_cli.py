@@ -110,3 +110,50 @@ def test_상태는_원자적으로_저장되고_다시_읽힌다(tmp_path):
 def test_상태_파일이_없으면_빈_dict(tmp_path):
     cfg = Config(state_dir=tmp_path / "state")
     assert cli._load_state(cfg) == {}
+
+
+# ── 실패 백오프 ─────────────────────────────────────────────────────────
+#
+# 회귀 방지. 2026-08-07 새벽, 한도가 안 풀린 세션을 30분마다 무한히 재개했다.
+# 하룻밤 재개 139건 중 137건이 그대로 튕겼고 실제로 이어간 건 2건이었다.
+# 원인은 `hit_limit_again` 일 때 상태를 아예 안 남긴 것 — 다음 사이클에
+# "재개한 적 없음"으로 보여 또 두드렸다.
+
+def test_한도가_그대로면_다음_사이클에_또_재개하지_않는다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    s = _session()
+    state = {s.session_id: {"fails": 1, "failed_at": NOW.isoformat()}}
+
+    # 30분 뒤 — 예전엔 여기서 또 재개했다
+    assert cli._due(s, state, cfg, NOW + timedelta(minutes=30)) is not None
+    # 1시간 백오프가 지나면 다시 시도한다
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=1, minutes=1)) is None
+
+
+def test_실패가_쌓이면_대기가_배로_늘어난다():
+    assert cli.backoff_for(1) == timedelta(hours=1)
+    assert cli.backoff_for(3) == timedelta(hours=4)
+    assert cli.backoff_for(5) == timedelta(hours=16)
+    assert cli.backoff_for(99) == timedelta(hours=24)  # 무한정 늘지는 않는다
+
+
+def test_이어가는_데_성공하면_실패_기록이_지워진다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    s = _session()
+    # 실패 4회가 쌓여 8시간을 기다리는 중이라도, 성공 재개는 그 기록을 지운다
+    state = {s.session_id: {"fails": 4, "failed_at": NOW.isoformat()}}
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=1)) is not None
+
+    entry = state[s.session_id]
+    entry["resumed_at"] = NOW.isoformat()
+    entry.pop("fails"), entry.pop("failed_at")
+    # 성공 쿨다운(기본 5시간)만 남는다
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=1)) is not None
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=6)) is None
+
+
+def test_손상된_시각은_쿨다운을_강제하지_않는다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    s = _session()
+    state = {s.session_id: {"fails": 2, "failed_at": "망가진값"}}
+    assert cli._due(s, state, cfg, NOW) is None

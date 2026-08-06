@@ -62,22 +62,52 @@ def _acquire_lock(cfg: Config) -> Path | None:
     return lock
 
 
+#: 재개했는데 한도가 그대로일 때 다음 시도까지 기다리는 시간. 실패가 쌓일수록 배로 늘린다.
+#:
+#: 왜 필요한가: 실패를 기록하지 않던 시절, 한도가 안 풀린 세션을 매 사이클(30분) 무한히
+#: 두드렸다. 하룻밤에 재개 139건 중 137건이 그대로 튕겼다(실제로 이어간 건 2건).
+#: 재개가 안 되는 세션일수록 더 자주 시도하는 구조였다.
+_BACKOFF = [timedelta(hours=h) for h in (1, 2, 4, 8, 16)]
+_BACKOFF_MAX = timedelta(hours=24)
+
+
+def backoff_for(fails: int) -> timedelta:
+    """실패 `fails` 회 뒤 기다릴 시간. 1·2·4·8·16시간으로 늘고 24시간에서 멈춘다."""
+    if fails < 1:
+        return timedelta(0)
+    return _BACKOFF[fails - 1] if fails <= len(_BACKOFF) else _BACKOFF_MAX
+
+
+def _at(raw: object, now: datetime) -> datetime | None:
+    """상태 파일의 시각 문자열을 읽는다. 손상됐으면 None — 쿨다운을 강제하지 않는다."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        t = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+    return t.replace(tzinfo=now.tzinfo) if t.tzinfo is None else t  # 예전 naive 기록 보정
+
+
 def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> str | None:
     """재개하면 안 되는 이유. None 이면 해도 된다."""
     if not session.limit.is_over(now):
         when = session.limit.reset_at
         return f"아직 안 풀림 (해제 {when:%H:%M})" if when else "해제 시각 불명"
-    last = state.get(session.session_id, {}).get("resumed_at")
-    if last:
-        try:
-            prev = datetime.fromisoformat(last)
-            if prev.tzinfo is None:  # 예전 상태 파일이 naive 로 남긴 경우
-                prev = prev.replace(tzinfo=now.tzinfo)
-            gap = now - prev
-        except (ValueError, TypeError):
-            return None  # 손상된 값 — 쿨다운을 강제하지 않는다
+
+    entry = state.get(session.session_id, {})
+
+    if prev := _at(entry.get("resumed_at"), now):
+        gap = now - prev
         if gap < timedelta(hours=cfg.resume_cooldown_hours):
             return f"최근에 재개함 ({gap.total_seconds() / 3600:.1f}시간 전)"
+
+    # 재개는 했는데 한도가 그대로였던 경우. 재우지 않으면 같은 세션을 매 사이클 두드린다.
+    if failed := _at(entry.get("failed_at"), now):
+        fails = int(entry.get("fails", 1) or 1)
+        left = backoff_for(fails) - (now - failed)
+        if left > timedelta(0):
+            return f"한도 그대로였음 {fails}회 · {left.total_seconds() / 3600:.1f}시간 더 기다림"
     return None
 
 
@@ -127,12 +157,23 @@ def cmd_run(cfg: Config) -> int:
             result = resume(session, cfg)
             resumed += 1
 
-            if result.hit_limit_again:
-                print("  └ 아직 한도가 풀리지 않았습니다. 다음 사이클에 다시 봅니다.")
-                continue  # 쿨다운을 기록하지 않는다 — 실제로 이어간 게 아니다
+            entry = state.setdefault(session.session_id, {})
+            entry["project"] = session.project
 
-            state.setdefault(session.session_id, {})["resumed_at"] = now.isoformat()
-            state[session.session_id]["project"] = session.project
+            if result.hit_limit_again:
+                # 실제로 이어간 게 아니니 성공 쿨다운은 안 준다. 대신 실패를 세어 재운다.
+                # 이걸 기록하지 않으면 다음 사이클에 "재개한 적 없음"으로 보여 또 두드린다.
+                entry["fails"] = int(entry.get("fails", 0) or 0) + 1
+                entry["failed_at"] = now.isoformat()
+                _save_state(cfg, state)
+                wait = backoff_for(entry["fails"]).total_seconds() / 3600
+                print(f"  └ 아직 한도가 풀리지 않았습니다({entry['fails']}회). "
+                      f"{wait:.0f}시간 뒤에 다시 봅니다.")
+                continue
+
+            entry["resumed_at"] = now.isoformat()
+            entry.pop("fails", None)  # 이어갔으면 실패 기록을 지운다
+            entry.pop("failed_at", None)
             _save_state(cfg, state)
 
             how = "새로 시작" if result.fallback else "이어감"
