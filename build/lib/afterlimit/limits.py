@@ -59,8 +59,10 @@ _MONTHS = {
 
 #: 서버 측 rate limit 재시도 간격. reset 시각이 없으니 짧게 잡고 다시 본다.
 SERVER_RATE_RETRY = timedelta(minutes=10)
-#: 월 지출 한도는 사용자가 직접 올려야 풀린다. 매 사이클 무의미하게 두드리지 않도록 간격을 둔다.
-SPEND_RETRY = timedelta(minutes=30)
+#: 월 지출 한도는 사용자가 직접 올려야 풀린다. 자동으로 풀리기를 기다리는 게 아니므로 길게 잡는다.
+#: 30분이던 시절, 사람이 자는 동안 지출 한도 세션을 밤새 두드려 137번을 헛되이 태웠다.
+#: 사람이 한도를 올리면 그때부터 6시간 안에 잡힌다 — 그 정도 지연이면 충분하다.
+SPEND_RETRY = timedelta(hours=6)
 #: 시간만 있는 reset 을 anchor 로 못 맞추면(기록이 오래됐거나 시계가 어긋남) 현재 기준으로 다시 잡는다.
 _ANCHOR_STALE = timedelta(hours=12)
 

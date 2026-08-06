@@ -6,6 +6,8 @@ subprocess 는 config.dry_run 으로 차단해 claude 를 실제로 부르지 �
 
 from __future__ import annotations
 
+import os
+
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -157,3 +159,36 @@ def test_손상된_시각은_쿨다운을_강제하지_않는다(tmp_path):
     s = _session()
     state = {s.session_id: {"fails": 2, "failed_at": "망가진값"}}
     assert cli._due(s, state, cfg, NOW) is None
+
+
+# ── 죽은 잠금 ───────────────────────────────────────────────────────────
+#
+# 회귀 방지. 2026-08-07, 실행 중인 잡을 껐다 켜자 죽은 프로세스의 잠금이 남아
+# 이후 모든 사이클이 "이미 실행 중입니다"로 아무것도 안 했다. 나이 제한(16분)만
+# 있어서, 그동안 무인 재개가 통째로 멎었다.
+
+def test_주인이_죽은_잠금은_즉시_치운다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    lock = cfg.lock_dir
+    lock.mkdir(parents=True, exist_ok=True)
+    dead = lock / "run.lock"
+    dead.write_text("999999")  # 존재할 수 없는 PID
+
+    got = cli._acquire_lock(cfg)
+    assert got is not None, "죽은 잠금인데도 막혔다"
+    assert int(got.read_text()) == os.getpid()  # 내 것으로 바뀌었다
+
+
+def test_살아있는_주인의_잠금은_존중한다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    first = cli._acquire_lock(cfg)
+    assert first is not None
+    # 방금 내가 잡았고 나는 살아 있다 — 두 번째는 막혀야 한다
+    assert cli._acquire_lock(cfg) is None
+
+
+def test_PID를_못_읽으면_잠금을_존중한다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    cfg.lock_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.lock_dir / "run.lock").write_text("망가진값")
+    assert cli._acquire_lock(cfg) is None  # 애매하면 남기는 쪽
