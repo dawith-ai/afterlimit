@@ -232,8 +232,11 @@ def cmd_run(cfg: Config) -> int:
                     g["spend_failed_at"] = now.isoformat()
                 _save_state(cfg, state)
                 wait = backoff_for(entry["fails"]).total_seconds() / 3600
-                print(f"  └ 아직 한도가 풀리지 않았습니다({entry['fails']}회). "
-                      f"{wait:.0f}시간 뒤에 다시 봅니다.")
+                # ★ 걸린 시간과 출력량을 같이 남긴다. 이게 없으면 "바로 튕김"과
+                #   "한참 일하다 끝에 걸림"을 구분할 수 없어, 실제로 진척된 작업까지
+                #   실패로 읽게 된다 (2026-08-08 사장님 지적으로 발견).
+                print(f"  └ 한도 재차단({entry['fails']}회) · {result.elapsed_sec:.0f}초 · "
+                      f"출력 {len(result.output.strip())}자 → {wait:.0f}시간 뒤 재시도")
                 continue
 
             entry["resumed_at"] = now.isoformat()
@@ -244,7 +247,8 @@ def cmd_run(cfg: Config) -> int:
 
             how = "새로 시작" if result.fallback else "이어감"
             status = "완료" if result.ok else f"실패: {result.error.strip()[:120]}"
-            print(f"  └ {how} · {result.elapsed_sec:.0f}초 · {status}")
+            tail = " · 끝에 한도 재도달" if result.limit_mentioned else ""
+            print(f"  └ {how} · {result.elapsed_sec:.0f}초 · {result.work_chars}자 · {status}{tail}")
             notify(cfg, f"[afterlimit] {session.project} {how} — {status}")
 
         if resumed == 0:

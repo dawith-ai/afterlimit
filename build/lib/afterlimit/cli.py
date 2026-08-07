@@ -113,6 +113,30 @@ def _at(raw: object, now: datetime) -> datetime | None:
     return t.replace(tzinfo=now.tzinfo) if t.tzinfo is None else t  # 예전 naive 기록 보정
 
 
+#: 세션 id 가 아닌 전역 상태 자리. UUID 와 겹치지 않는다.
+_GLOBAL = "_global"
+
+
+def _spend_wait(state: dict, now: datetime) -> str | None:
+    """계정 지출 한도로 막혀 있는 동안의 전역 대기.
+
+    지출 한도는 **계정 전체** 조건이다. 한 세션이 튕겼으면 나머지도 전부 튕긴다.
+    세션마다 따로 배우게 두면 76개가 각자 부딪혀 하룻밤에 300번을 헛되이 태운다
+    (2026-08-08 실측: 최근 100회 시도 중 성공 1건). 한 번 튕기면 전부 같이 쉰다.
+    간격은 세션별 백오프와 같다 — 1·2·4·8·16시간, 최대 24시간.
+    """
+    e = state.get(_GLOBAL, {})
+    at = _at(e.get("spend_failed_at"), now)
+    if not at:
+        return None
+    fails = int(e.get("spend_fails", 1) or 1)
+    left = backoff_for(fails) - (now - at)
+    if left > timedelta(0):
+        return (f"계정 지출 한도 {fails}회 확인됨 · "
+                f"{left.total_seconds() / 3600:.1f}시간 뒤 다시 확인 (/usage-credits)")
+    return None
+
+
 def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> str | None:
     """재개하면 안 되는 이유. None 이면 해도 된다."""
     if not session.limit.is_over(now):
@@ -128,6 +152,8 @@ def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> st
         #    실패 1회당 1·2·4·8·16시간, 최대 24시간으로 간격을 벌린다.
         if session.limit.kind != "spend":
             return "해제 시각 불명"
+        if reason := _spend_wait(state, now):
+            return reason
 
     entry = state.get(session.session_id, {})
 
@@ -199,15 +225,24 @@ def cmd_run(cfg: Config) -> int:
                 # 이걸 기록하지 않으면 다음 사이클에 "재개한 적 없음"으로 보여 또 두드린다.
                 entry["fails"] = int(entry.get("fails", 0) or 0) + 1
                 entry["failed_at"] = now.isoformat()
+                if session.limit.kind == "spend":
+                    # 계정 전체 조건이므로 전역에도 적어 나머지 세션까지 같이 재운다
+                    g = state.setdefault(_GLOBAL, {})
+                    g["spend_fails"] = int(g.get("spend_fails", 0) or 0) + 1
+                    g["spend_failed_at"] = now.isoformat()
                 _save_state(cfg, state)
                 wait = backoff_for(entry["fails"]).total_seconds() / 3600
-                print(f"  └ 아직 한도가 풀리지 않았습니다({entry['fails']}회). "
-                      f"{wait:.0f}시간 뒤에 다시 봅니다.")
+                # ★ 걸린 시간과 출력량을 같이 남긴다. 이게 없으면 "바로 튕김"과
+                #   "한참 일하다 끝에 걸림"을 구분할 수 없어, 실제로 진척된 작업까지
+                #   실패로 읽게 된다 (2026-08-08 사장님 지적으로 발견).
+                print(f"  └ 한도 재차단({entry['fails']}회) · {result.elapsed_sec:.0f}초 · "
+                      f"출력 {len(result.output.strip())}자 → {wait:.0f}시간 뒤 재시도")
                 continue
 
             entry["resumed_at"] = now.isoformat()
             entry.pop("fails", None)  # 이어갔으면 실패 기록을 지운다
             entry.pop("failed_at", None)
+            state.pop(_GLOBAL, None)  # 한도가 풀렸다는 증거 — 전역 대기도 푼다
             _save_state(cfg, state)
 
             how = "새로 시작" if result.fallback else "이어감"

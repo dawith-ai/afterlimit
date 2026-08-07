@@ -69,3 +69,38 @@ def test_또_한도에_걸리면_폴백하지_않는다():
 def test_hit_limit_again_판정():
     assert ResumeResult(False, False, "You've hit your usage limit", "", 1.0).hit_limit_again
     assert not ResumeResult(True, False, "다 끝냈습니다", "", 1.0).hit_limit_again
+
+
+# ── 진척 판정 ───────────────────────────────────────────────────────────
+#
+# 회귀 방지. 2026-08-08: news-auto 세션이 559초 동안 블로그 초안 5,576자를 만들고
+# 커밋(1e22b4c3)까지 했는데 출력 끝에 한도 문구가 있다는 이유로 '실패'로 기록됐다.
+# 그렇게 쌓인 가짜 실패로 세션 145개가 최대 6시간 백오프에 갇혀 재개가 멎었다.
+
+_LIMIT = "You've hit your org's monthly spend limit · run /usage-credits to raise it"
+
+
+def test_한참_일하고_끝에_한도면_실패가_아니다():
+    work = "블로그 초안을 완성해 커밋했습니다. " * 20  # 200자 훌쩍 넘김
+    r = ResumeResult(True, False, f"{work}\n{_LIMIT}", "", 559.0)
+    assert r.limit_mentioned          # 문구는 있다
+    assert r.work_chars >= 200        # 그런데 일을 했다
+    assert not r.hit_limit_again      # → 실패로 세지 않는다
+
+
+def test_아무것도_못_하고_한도면_실패다():
+    r = ResumeResult(False, False, _LIMIT, "", 3.0)
+    assert r.limit_mentioned
+    assert r.work_chars < 200
+    assert r.hit_limit_again
+
+
+def test_한도_문구가_없으면_당연히_실패가_아니다():
+    r = ResumeResult(True, False, "작업을 이어서 마쳤습니다.", "", 120.0)
+    assert not r.limit_mentioned
+    assert not r.hit_limit_again
+
+
+def test_산출량은_한도_안내줄을_빼고_센다():
+    r = ResumeResult(True, False, f"{_LIMIT}\n짧은답", "", 5.0)
+    assert r.work_chars == len("짧은답")   # 안내 문구는 산출로 치지 않는다

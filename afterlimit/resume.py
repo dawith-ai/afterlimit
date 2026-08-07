@@ -16,6 +16,10 @@ from afterlimit.sessions import BlockedSession
 
 __all__ = ["ResumeResult", "resume"]
 
+#: 이 정도 글자를 냈으면 뭔가 한 것으로 본다. 한도 안내 문구 자체는 150자 안팎이라
+#: 그보다 넉넉히 위에 둔다.
+MIN_WORK_CHARS = 200
+
 
 @dataclass(frozen=True)
 class ResumeResult:
@@ -27,10 +31,32 @@ class ResumeResult:
     elapsed_sec: float
 
     @property
-    def hit_limit_again(self) -> bool:
-        """재개했는데 또 한도에 걸렸다 — 아직 안 풀린 것이다."""
+    def limit_mentioned(self) -> bool:
+        """출력 어딘가에 한도 문구가 있다. 이것만으론 실패인지 알 수 없다."""
         blob = f"{self.output}\n{self.error}".lower()
         return any(p in blob for p in LIMIT_PATTERNS)
+
+    @property
+    def work_chars(self) -> int:
+        """한도 안내 줄을 뺀 실제 산출 분량. 진척 여부는 이걸로 잰다."""
+        keep = [
+            ln for ln in self.output.splitlines()
+            if not any(p in ln.lower() for p in LIMIT_PATTERNS)
+        ]
+        return len("\n".join(keep).strip())
+
+    @property
+    def hit_limit_again(self) -> bool:
+        """재개했는데 **아무것도 못 하고** 한도에 걸렸나.
+
+        ⚠️ 한도 문구가 있다고 곧바로 실패가 아니다. 한참 일하다 마지막에 걸린 것도
+        같은 문구를 남긴다 — 그건 진척이지 실패가 아니다.
+
+        2026-08-08 실측: news-auto 세션 하나가 559초 동안 블로그 초안 5,576자를
+        만들고 커밋(1e22b4c3)까지 했는데 '한도 걸림'으로 기록됐다. 그렇게 쌓인
+        가짜 실패로 세션 145개가 최대 6시간 백오프에 갇혀 실제로 재개가 멎었다.
+        """
+        return self.limit_mentioned and self.work_chars < MIN_WORK_CHARS
 
 
 def _run(cmd: list[str], cwd: str, timeout: int) -> tuple[int, str, str, float]:
