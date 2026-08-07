@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from afterlimit.config import Config
-from afterlimit.limits import LimitInfo, local_tz, parse_limit
+from afterlimit.limits import LIMIT_PATTERNS, LimitInfo, local_tz, parse_limit
 
 __all__ = ["BlockedSession", "scan_blocked", "session_started_at"]
 
@@ -158,6 +158,79 @@ def _extract_cwd_and_messages(lines: list[str]) -> tuple[str | None, str, str]:
     return cwd, last_user.strip(), last_assistant.strip()
 
 
+def _is_human_turn(obj: dict) -> bool:
+    """사람이 직접 친 입력인가. 도구 결과도 role=user 로 들어오므로 구분해야 한다."""
+    msg = obj.get("message") or {}
+    if msg.get("role") != "user":
+        return False
+    if obj.get("toolUseResult") is not None:
+        return False  # 도구 결과
+    content = msg.get("content")
+    if isinstance(content, list):
+        return not any(b.get("type") == "tool_result" for b in content if isinstance(b, dict))
+    return True
+
+
+def _cut_off_mid_action(obj: dict) -> bool:
+    """마지막 레코드가 '결과가 안 돌아온 도구 호출'인가 = 하던 중에 끊겼다는 뜻."""
+    msg = obj.get("message") or {}
+    if msg.get("role") != "assistant":
+        return False
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(b.get("type") == "tool_use" for b in content if isinstance(b, dict))
+
+
+def _stalled_after_limit(
+    lines: list[str], blocked_at: datetime, now: datetime, cfg: Config
+) -> LimitInfo | None:
+    """에이전트가 돌린 명령이 한도에 걸려, 하던 일이 끊긴 채 멈춘 세션.
+
+    세션 **자신의** API 호출이 막힌 경우는 `_extract_last_api_error` 가 잡는다.
+    여기서 잡는 건 다른 경우다 — 세션이 shell 로 실행한 명령이 한도에 걸린 것.
+    화면에는 빨간 한도 메시지가 남지만 마지막 메시지는 정상 응답이라,
+    예전에는 아무도 이어주지 않고 영원히 멈춰 있었다.
+
+    조건 셋을 **모두** 만족해야 한다. 하나라도 빼면 오탐이 쏟아진다
+    (2026-08-08 실측: ③ 없이는 최근 3일 세션 546개 중 279개가 걸렸다. 셋 다 쓰면 1개).
+      ① 꼬리 N개 레코드 안에 한도 문구가 있다
+      ② 그 뒤로 **사람이 입력한 적이 없다** (사람이 답했으면 이미 넘어간 것이다)
+      ③ 마지막 레코드가 결과 없는 `tool_use` 다 — 하던 중에 끊긴 흔적
+
+    그리고 사람이 지금 쓰고 있는 세션을 뺏지 않도록 일정 시간 멈춰 있어야 한다.
+    """
+    if not cfg.resume_stalled:
+        return None
+    if blocked_at > now - timedelta(minutes=cfg.stalled_idle_minutes):
+        return None  # 아직 활동 중일 수 있다
+
+    recs: list[dict] = []
+    for line in lines[-cfg.stalled_tail_records :]:
+        try:
+            recs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not recs:
+        return None
+
+    last_limit = -1
+    for i, obj in enumerate(recs):
+        blob = json.dumps(obj, ensure_ascii=False).lower()
+        if any(p in blob for p in LIMIT_PATTERNS):
+            last_limit = i
+    if last_limit < 0:
+        return None  # ①
+
+    if any(_is_human_turn(obj) for obj in recs[last_limit + 1 :]):
+        return None  # ②
+    if not _cut_off_mid_action(recs[-1]):
+        return None  # ③
+
+    # 해제 시각은 없다. 시간이 아니라 '아무도 안 이어줌'이 조건이므로 백오프가 속도를 정한다.
+    return LimitInfo("stalled", None, "stalled after limit in a shell command")
+
+
 def _inspect(jsonl: Path, cfg: Config, now: datetime) -> BlockedSession | None:
     """세션 파일 하나를 보고 막혔으면 BlockedSession, 아니면 None."""
     try:
@@ -179,10 +252,11 @@ def _inspect(jsonl: Path, cfg: Config, now: datetime) -> BlockedSession | None:
         return None
 
     text, is_error = _extract_last_api_error(lines)
-    if not is_error:
-        return None
-
-    limit = parse_limit(text, anchor=blocked_at, now=now)
+    if is_error:
+        limit = parse_limit(text, anchor=blocked_at, now=now)
+    else:
+        # 세션 자신이 막힌 건 아니지만, 돌리던 명령이 한도에 걸려 끊긴 채 멈췄을 수 있다.
+        limit = _stalled_after_limit(lines, blocked_at, now, cfg)
     if limit is None:
         return None
 

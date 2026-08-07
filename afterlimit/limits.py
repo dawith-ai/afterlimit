@@ -22,7 +22,7 @@ from typing import Literal
 
 __all__ = ["LimitInfo", "LimitKind", "local_tz", "parse_limit"]
 
-LimitKind = Literal["usage", "server_rate", "spend"]
+LimitKind = Literal["usage", "server_rate", "spend", "stalled"]
 
 #: 한도 메시지로 볼 표지. 하나라도 없으면 한도가 아니다.
 LIMIT_PATTERNS: tuple[str, ...] = (

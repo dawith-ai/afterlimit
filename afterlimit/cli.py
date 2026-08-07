@@ -38,6 +38,19 @@ def _save_state(cfg: Config, state: dict) -> None:
     tmp.replace(cfg.state_file)  # 원자적 교체 — 중간에 죽어도 파일이 깨지지 않는다
 
 
+def _commit(cfg: Config, mutate) -> None:
+    """디스크의 최신 상태를 **다시 읽어** 바꾸고 저장한다.
+
+    한 사이클이 재개에 수 분을 쓰는 동안 다른 곳(사람·다른 도구·다음 사이클)이
+    상태를 바꿀 수 있다. 사이클 시작 때 읽은 사본을 통째로 덮어쓰면 그 변경이
+    조용히 사라진다 — 2026-08-08 실측: 잘못 쌓인 실패 기록 145개를 지웠는데
+    진행 중이던 8분짜리 재개가 끝나면서 옛 사본으로 전부 되살려 놨다.
+    """
+    fresh = _load_state(cfg)
+    mutate(fresh)
+    _save_state(cfg, fresh)
+
+
 def _owner_alive(lock: Path) -> bool:
     """잠금을 만든 프로세스가 아직 살아 있나.
 
@@ -150,9 +163,9 @@ def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> st
         #    지출 한도는 간헐적으로 열린다(그날 밤 282초·225초짜리 실제 작업이 실제로 이어졌다).
         #    두드려봐야 열린 걸 안다. 다만 열릴 때까지 매 사이클 두드리면 안 되므로,
         #    실패 1회당 1·2·4·8·16시간, 최대 24시간으로 간격을 벌린다.
-        if session.limit.kind != "spend":
+        if session.limit.kind not in ("spend", "stalled"):
             return "해제 시각 불명"
-        if reason := _spend_wait(state, now):
+        if session.limit.kind == "spend" and (reason := _spend_wait(state, now)):
             return reason
 
     entry = state.get(session.session_id, {})
@@ -217,20 +230,25 @@ def cmd_run(cfg: Config) -> int:
             result = resume(session, cfg)
             resumed += 1
 
-            entry = state.setdefault(session.session_id, {})
-            entry["project"] = session.project
+            sid, kind, proj = session.session_id, session.limit.kind, session.project
 
             if result.hit_limit_again:
                 # 실제로 이어간 게 아니니 성공 쿨다운은 안 준다. 대신 실패를 세어 재운다.
                 # 이걸 기록하지 않으면 다음 사이클에 "재개한 적 없음"으로 보여 또 두드린다.
-                entry["fails"] = int(entry.get("fails", 0) or 0) + 1
-                entry["failed_at"] = now.isoformat()
-                if session.limit.kind == "spend":
-                    # 계정 전체 조건이므로 전역에도 적어 나머지 세션까지 같이 재운다
-                    g = state.setdefault(_GLOBAL, {})
-                    g["spend_fails"] = int(g.get("spend_fails", 0) or 0) + 1
-                    g["spend_failed_at"] = now.isoformat()
-                _save_state(cfg, state)
+                def _fail(s: dict) -> None:
+                    e = s.setdefault(sid, {})
+                    e["project"] = proj
+                    e["fails"] = int(e.get("fails", 0) or 0) + 1
+                    e["failed_at"] = now.isoformat()
+                    if kind == "spend":
+                        # 계정 전체 조건이므로 전역에도 적어 나머지 세션까지 같이 재운다
+                        g = s.setdefault(_GLOBAL, {})
+                        g["spend_fails"] = int(g.get("spend_fails", 0) or 0) + 1
+                        g["spend_failed_at"] = now.isoformat()
+
+                _commit(cfg, _fail)
+                state = _load_state(cfg)
+                entry = state.get(sid, {})
                 wait = backoff_for(entry["fails"]).total_seconds() / 3600
                 # ★ 걸린 시간과 출력량을 같이 남긴다. 이게 없으면 "바로 튕김"과
                 #   "한참 일하다 끝에 걸림"을 구분할 수 없어, 실제로 진척된 작업까지
@@ -239,11 +257,16 @@ def cmd_run(cfg: Config) -> int:
                       f"출력 {len(result.output.strip())}자 → {wait:.0f}시간 뒤 재시도")
                 continue
 
-            entry["resumed_at"] = now.isoformat()
-            entry.pop("fails", None)  # 이어갔으면 실패 기록을 지운다
-            entry.pop("failed_at", None)
-            state.pop(_GLOBAL, None)  # 한도가 풀렸다는 증거 — 전역 대기도 푼다
-            _save_state(cfg, state)
+            def _ok(s: dict) -> None:
+                e = s.setdefault(sid, {})
+                e["project"] = proj
+                e["resumed_at"] = now.isoformat()
+                e.pop("fails", None)  # 이어갔으면 실패 기록을 지운다
+                e.pop("failed_at", None)
+                s.pop(_GLOBAL, None)  # 한도가 풀렸다는 증거 — 전역 대기도 푼다
+
+            _commit(cfg, _ok)
+            state = _load_state(cfg)
 
             how = "새로 시작" if result.fallback else "이어감"
             status = "완료" if result.ok else f"실패: {result.error.strip()[:120]}"

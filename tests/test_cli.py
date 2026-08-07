@@ -249,3 +249,23 @@ def test_전역_대기_간격도_배로_늘어난다(tmp_path):
     s = _spend_session("x")
     assert cli._due(s, state, cfg, NOW + timedelta(hours=7)) is not None   # 8시간 대기 중
     assert cli._due(s, state, cfg, NOW + timedelta(hours=8, minutes=1)) is None
+
+
+# ── 상태 저장 경쟁 ───────────────────────────────────────────────────────
+#
+# 회귀 방지. 2026-08-08: 잘못 쌓인 실패 기록 145개를 지웠는데, 그때 진행 중이던
+# 8분짜리 재개가 끝나면서 사이클 시작 시점의 옛 사본으로 전부 되살려 놨다.
+
+def test_저장은_남의_변경을_지우지_않는다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    cli._save_state(cfg, {"a": {"fails": 1}})
+
+    # 사이클이 오래 도는 동안 바깥에서 상태가 바뀐 상황
+    cli._save_state(cfg, {"a": {"fails": 1}, "b": {"resumed_at": "x"}})
+
+    # 이 사이클은 자기 항목만 갱신해야 한다
+    cli._commit(cfg, lambda s: s.setdefault("a", {}).update({"fails": 2}))
+
+    after = cli._load_state(cfg)
+    assert after["a"]["fails"] == 2      # 내 변경은 반영되고
+    assert "b" in after                  # 남의 변경도 살아남는다

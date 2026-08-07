@@ -64,6 +64,14 @@ class Config:
     #: True 면 실제로 재개하지 않고 무엇을 할지만 보고한다
     dry_run: bool = False
 
+    #: 세션이 돌린 명령이 한도에 걸려 하던 일이 끊긴 채 멈춘 세션도 이어줄지.
+    #: 끄면 세션 자신의 API 호출이 막힌 경우만 다룬다(0.1.0 동작).
+    resume_stalled: bool = True
+    #: 그 판정에 볼 꼬리 레코드 수.
+    stalled_tail_records: int = 30
+    #: 이 시간 이상 멈춰 있어야 대상. 사람이 지금 쓰는 세션을 뺏지 않기 위한 여유.
+    stalled_idle_minutes: int = 20
+
     @property
     def lock_dir(self) -> Path:
         return self.state_dir / "locks"
