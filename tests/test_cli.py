@@ -217,3 +217,35 @@ def test_지출_한도도_재개하되_백오프로_간격을_벌린다(tmp_path
     state = {s.session_id: {"fails": 1, "failed_at": NOW.isoformat()}}
     assert cli._due(s, state, cfg, NOW + timedelta(minutes=30)) is not None
     assert cli._due(s, state, cfg, NOW + timedelta(hours=1, minutes=1)) is None
+
+
+# ── 계정 지출 한도 전역 대기 ─────────────────────────────────────────────
+#
+# 회귀 방지. 지출 한도는 계정 전체 조건이라 한 세션이 튕기면 나머지도 전부 튕긴다.
+# 세션마다 따로 배우게 뒀더니 76개가 각자 부딪혀 하룻밤에 300번을 태웠다
+# (2026-08-08 실측: 최근 100회 시도 중 성공 1건).
+
+def test_한_세션이_지출한도로_튕기면_나머지도_같이_쉰다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    state = {cli._GLOBAL: {"spend_fails": 1, "spend_failed_at": NOW.isoformat()}}
+
+    # 실패 기록이 전혀 없는 **다른** 세션도 막힌다
+    other = _spend_session("neverTried")
+    assert cli._due(other, state, cfg, NOW + timedelta(minutes=30)) is not None
+    # 백오프가 지나면 다시 한 번 확인해본다 (영영 막지는 않는다)
+    assert cli._due(other, state, cfg, NOW + timedelta(hours=1, minutes=1)) is None
+
+
+def test_전역_대기는_토큰_초기화_세션을_막지_않는다(tmp_path):
+    """지출 한도와 usage 리셋은 별개다. 전자가 걸려도 후자는 제 시각에 재개한다."""
+    cfg = Config(state_dir=tmp_path / "state")
+    state = {cli._GLOBAL: {"spend_fails": 3, "spend_failed_at": NOW.isoformat()}}
+    assert cli._due(_session(), state, cfg, NOW) is None  # usage · 리셋 지남
+
+
+def test_전역_대기_간격도_배로_늘어난다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    state = {cli._GLOBAL: {"spend_fails": 4, "spend_failed_at": NOW.isoformat()}}
+    s = _spend_session("x")
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=7)) is not None   # 8시간 대기 중
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=8, minutes=1)) is None

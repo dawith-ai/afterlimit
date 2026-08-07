@@ -119,12 +119,15 @@ def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> st
         when = session.limit.reset_at
         if when:
             return f"아직 안 풀림 (해제 {when:%H:%M})"
-        # 지출 한도엔 해제 시각이 없다. 기다린다고 풀리지 않으니 자동 재개에서 뺀다.
-        # 사람이 한도를 올린 뒤 `afterlimit run --spend` 로 명시하면 그때 다시 본다.
+        # 지출 한도엔 해제 시각이 없다. 시각으로 판단할 수 없으니 아래 **백오프**가 속도를 정한다.
+        #
+        # ⚠️ 자동 재개에서 통째로 빼면 안 된다(2026-08-07 실수). 한 번 그렇게 했더니 막힌
+        #    세션이 전부 지출 한도라 재개가 0건이 됐다 — 헛발질은 막았지만 작업 이어가기도 죽었다.
+        #    지출 한도는 간헐적으로 열린다(그날 밤 282초·225초짜리 실제 작업이 실제로 이어졌다).
+        #    두드려봐야 열린 걸 안다. 다만 열릴 때까지 매 사이클 두드리면 안 되므로,
+        #    실패 1회당 1·2·4·8·16시간, 최대 24시간으로 간격을 벌린다.
         if session.limit.kind != "spend":
             return "해제 시각 불명"
-        if not cfg.include_spend:
-            return "지출 한도 — 사람이 올려야 풀림 (/usage-credits · 올린 뒤 run --spend)"
 
     entry = state.get(session.session_id, {})
 
@@ -240,12 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"afterlimit {__version__}")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("scan", help="막힌 세션과 해제 시각 보기")
-    run_p = sub.add_parser("run", help="풀린 세션 이어서 실행 (스케줄러가 호출)")
-    run_p.add_argument(
-        "--spend",
-        action="store_true",
-        help="지출 한도로 막힌 세션도 재개한다 (콘솔에서 한도를 올린 뒤 한 번 쓴다)",
-    )
+    sub.add_parser("run", help="풀린 세션 이어서 실행 (스케줄러가 호출)")
     sub.add_parser("config", help="현재 설정 보기")
 
     args = parser.parse_args(argv)
@@ -258,8 +256,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         cfg = replace(cfg, dry_run=True)
-    if getattr(args, "spend", False):
-        cfg = replace(cfg, include_spend=True)
 
     return {"scan": cmd_scan, "run": cmd_run, "config": cmd_config}.get(
         args.cmd or "scan", cmd_scan

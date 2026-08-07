@@ -63,9 +63,6 @@ class Config:
     webhook_url: str | None = None
     #: True 면 실제로 재개하지 않고 무엇을 할지만 보고한다
     dry_run: bool = False
-    #: 지출 한도로 막힌 세션도 재개 대상에 넣는다. `run --spend` 로만 켜진다.
-    #: 지출 한도는 시간이 아니라 사람이 올려야 풀리므로, 사람이 올린 뒤 한 번 쓰는 스위치다.
-    include_spend: bool = False
 
     @property
     def lock_dir(self) -> Path:
