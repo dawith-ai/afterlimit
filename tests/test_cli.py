@@ -207,13 +207,13 @@ def _spend_session(sid="spend1"):
     )
 
 
-def test_지출_한도는_자동_재개하지_않는다(tmp_path):
+def test_지출_한도도_재개하되_백오프로_간격을_벌린다(tmp_path):
+    """자동 재개에서 통째로 빼면 안 된다 — 한도가 풀렸는지 확인할 길이 사라진다."""
     cfg = Config(state_dir=tmp_path / "state")
-    reason = cli._due(_spend_session(), {}, cfg, NOW + timedelta(days=30))
-    assert reason is not None and "사람이 올려야" in reason
-
-
-def test_spend_스위치를_켜면_지출_한도도_재개한다(tmp_path):
-    from dataclasses import replace
-    cfg = replace(Config(state_dir=tmp_path / "state"), include_spend=True)
-    assert cli._due(_spend_session(), {}, cfg, NOW) is None
+    s = _spend_session()
+    # 처음엔 해본다 (해제 시각이 없어도 막지 않는다)
+    assert cli._due(s, {}, cfg, NOW) is None
+    # 한 번 튕기면 1시간은 쉰다
+    state = {s.session_id: {"fails": 1, "failed_at": NOW.isoformat()}}
+    assert cli._due(s, state, cfg, NOW + timedelta(minutes=30)) is not None
+    assert cli._due(s, state, cfg, NOW + timedelta(hours=1, minutes=1)) is None
