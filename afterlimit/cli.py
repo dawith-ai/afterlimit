@@ -117,7 +117,12 @@ def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> st
     """재개하면 안 되는 이유. None 이면 해도 된다."""
     if not session.limit.is_over(now):
         when = session.limit.reset_at
-        return f"아직 안 풀림 (해제 {when:%H:%M})" if when else "해제 시각 불명"
+        if when:
+            return f"아직 안 풀림 (해제 {when:%H:%M})"
+        # 지출 한도엔 해제 시각이 없다. 기다린다고 풀리지 않으니 그렇게 말한다.
+        if session.limit.kind == "spend":
+            return "지출 한도 — 사람이 올려야 풀림 (/usage-credits)"
+        return "해제 시각 불명"
 
     entry = state.get(session.session_id, {})
 

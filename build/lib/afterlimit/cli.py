@@ -38,6 +38,27 @@ def _save_state(cfg: Config, state: dict) -> None:
     tmp.replace(cfg.state_file)  # 원자적 교체 — 중간에 죽어도 파일이 깨지지 않는다
 
 
+def _owner_alive(lock: Path) -> bool:
+    """잠금을 만든 프로세스가 아직 살아 있나.
+
+    확실히 죽었을 때만 False 를 준다. 읽을 수 없거나 남의 프로세스면 살아 있다고 본다 —
+    PID 는 재사용되므로, 애매하면 잠금을 남기는 쪽이 안전하다(나이 제한이 결국 치운다).
+    """
+    try:
+        pid = int(lock.read_text().strip())
+    except (OSError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)  # 신호 0 = 존재 확인만
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 살아 있는 남의 프로세스
+    return True
+
+
 def _acquire_lock(cfg: Config) -> Path | None:
     """단일 인스턴스 보장. 스케줄러가 겹쳐 실행해도 두 번 재개하지 않는다."""
     cfg.lock_dir.mkdir(parents=True, exist_ok=True)
@@ -50,7 +71,10 @@ def _acquire_lock(cfg: Config) -> Path | None:
             age = datetime.now().timestamp() - lock.stat().st_mtime
         except OSError:
             return None
-        if age < cfg.invoke_timeout_sec + 60:
+        # 주인이 죽었으면 나이와 상관없이 치운다.
+        # 왜: 실행 도중 죽으면(스케줄러 재적재·재부팅·강제종료) 잠금이 남아 16분간
+        # 무인 재개가 통째로 멎는다. 2026-08-07 잡을 껐다 켜자 실제로 그렇게 됐다.
+        if _owner_alive(lock) and age < cfg.invoke_timeout_sec + 60:
             return None  # 아직 돌고 있다
         lock.unlink(missing_ok=True)  # 죽은 채 남은 잠금 — 치운다
         try:

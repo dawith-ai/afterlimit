@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from afterlimit.limits import SPEND_RETRY, LimitInfo, local_tz, parse_limit
+from afterlimit.limits import LimitInfo, local_tz, parse_limit
 
 SEOUL = ZoneInfo("Asia/Seoul")
 NEW_YORK = ZoneInfo("America/New_York")
@@ -141,9 +141,12 @@ def test_지출한도는_anchor_기준이라_밀리지_않는다():
         "monthly spend limit reached", anchor=anchor, now=anchor + timedelta(hours=2)
     )
 
+    # 지출 한도엔 해제 시각이 없다. 가짜 시각을 만들면 그 시각이 지나는 순간부터
+    # 계속 "풀렸다"고 판정해 풀릴 리 없는 한도를 사이클마다 두드린다(2026-08-07 137회).
     assert first.kind == "spend"
-    assert first.reset_at == anchor + SPEND_RETRY
-    assert later.reset_at == first.reset_at  # 시간이 흘러도 고정
+    assert first.reset_at is None
+    assert later.reset_at is None
+    assert not first.is_over(anchor + timedelta(days=30))  # 한 달 뒤에도 자동 재개 안 함
 
 
 def test_reset_시각이_없으면_모른다고_한다():
