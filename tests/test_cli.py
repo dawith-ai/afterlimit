@@ -192,3 +192,28 @@ def test_PID를_못_읽으면_잠금을_존중한다(tmp_path):
     cfg.lock_dir.mkdir(parents=True, exist_ok=True)
     (cfg.lock_dir / "run.lock").write_text("망가진값")
     assert cli._acquire_lock(cfg) is None  # 애매하면 남기는 쪽
+
+
+# ── 지출 한도 ───────────────────────────────────────────────────────────
+#
+# 지출 한도엔 해제 시각이 없다. 가짜 시각을 만들어 두면 그 시각 이후 계속
+# "풀렸다"고 보고 풀릴 리 없는 한도를 사이클마다 두드린다(2026-08-07 137회).
+
+def _spend_session(sid="spend1"):
+    return BlockedSession(
+        session_id=sid, jsonl=None, cwd="/work/repo",
+        limit=LimitInfo("spend", None, "monthly spend limit"),
+        blocked_at=NOW - timedelta(hours=2), started_at=NOW - timedelta(hours=3),
+    )
+
+
+def test_지출_한도는_자동_재개하지_않는다(tmp_path):
+    cfg = Config(state_dir=tmp_path / "state")
+    reason = cli._due(_spend_session(), {}, cfg, NOW + timedelta(days=30))
+    assert reason is not None and "사람이 올려야" in reason
+
+
+def test_spend_스위치를_켜면_지출_한도도_재개한다(tmp_path):
+    from dataclasses import replace
+    cfg = replace(Config(state_dir=tmp_path / "state"), include_spend=True)
+    assert cli._due(_spend_session(), {}, cfg, NOW) is None

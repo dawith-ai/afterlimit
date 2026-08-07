@@ -59,10 +59,8 @@ _MONTHS = {
 
 #: 서버 측 rate limit 재시도 간격. reset 시각이 없으니 짧게 잡고 다시 본다.
 SERVER_RATE_RETRY = timedelta(minutes=10)
-#: 월 지출 한도는 사용자가 직접 올려야 풀린다. 자동으로 풀리기를 기다리는 게 아니므로 길게 잡는다.
-#: 30분이던 시절, 사람이 자는 동안 지출 한도 세션을 밤새 두드려 137번을 헛되이 태웠다.
-#: 사람이 한도를 올리면 그때부터 6시간 안에 잡힌다 — 그 정도 지연이면 충분하다.
-SPEND_RETRY = timedelta(hours=6)
+# (지출 한도용 재시도 간격은 없앴다. 아래 parse_limit 의 spend 분기 주석 참고 —
+#  시간으로 풀리는 한도가 아니라 사람이 올려야 하는 한도라, 재시도 간격 자체가 틀린 개념이었다.)
 #: 시간만 있는 reset 을 anchor 로 못 맞추면(기록이 오래됐거나 시계가 어긋남) 현재 기준으로 다시 잡는다.
 _ANCHOR_STALE = timedelta(hours=12)
 
@@ -149,10 +147,17 @@ def parse_limit(text: str, *, anchor: datetime, now: datetime | None = None) -> 
     if any(m in lowered for m in SERVER_RATE_MARKERS):
         return LimitInfo("server_rate", now + SERVER_RATE_RETRY, "server-side rate limit")
 
-    # 월 지출 한도 — 사용자가 콘솔에서 올려야 풀린다.
-    # anchor 기준으로 잡아야 한다. now 기준이면 스캔할 때마다 미래로 밀려 영영 재개되지 않는다.
+    # 월 지출 한도 — 사람이 콘솔에서 올려야 풀린다. **초기화 시각이라는 게 없다.**
+    #
+    # 예전엔 `anchor + SPEND_RETRY` 로 가짜 해제 시각을 만들어 뒀다. 그러면 그 시각이 지나는
+    # 순간부터 `is_over()` 가 계속 참이 되어, 풀릴 리 없는 한도를 사이클마다 두드린다.
+    # 2026-08-07 밤새 재개 139건 중 137건이 이렇게 헛돌았다.
+    #
+    # reset_at=None 이면 `is_over()` 가 항상 거짓이라 자동 재개 대상에서 빠진다.
+    # 시간이 아니라 **사람**이 조건이므로, 그게 정확한 표현이다.
+    # 사람이 한도를 올린 뒤엔 세션이 새 메시지를 남기고 그때부터 정상 판정된다.
     if "spend limit" in lowered:
-        return LimitInfo("spend", anchor + SPEND_RETRY, "monthly spend limit")
+        return LimitInfo("spend", None, "monthly spend limit")
 
     m = RESET_RE.search(text)
     if not m:
