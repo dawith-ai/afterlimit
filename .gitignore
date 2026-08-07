@@ -7,3 +7,8 @@ __pycache__/
 cron_oauth_token
 notify.json
 *.local.json
+
+# 빌드 산출물 — 로컬 설치 시 생성된다. 레포에 올리면 커밋마다 잡음이 낀다.
+build/
+dist/
+*.egg-info/

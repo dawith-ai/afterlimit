@@ -1,2 +1,0 @@
-[console_scripts]
-afterlimit = afterlimit.cli:main

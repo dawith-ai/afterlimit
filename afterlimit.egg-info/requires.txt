@@ -1,6 +1,0 @@
-
-[dev]
-pytest>=8
-
-[dev:platform_system == "Windows"]
-tzdata
