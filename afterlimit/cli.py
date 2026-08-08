@@ -252,7 +252,10 @@ def cmd_run(cfg: Config) -> int:
             state = _load_state(cfg)
 
             how = "새로 시작" if result.fallback else "이어감"
-            status = "완료" if result.ok else f"실패: {result.error.strip()[:120]}"
+            # 실패 사유는 stderr 가 비어 있을 때가 많다. 그럴 땐 stdout 앞부분을 보여준다 —
+            # 이게 없으면 "실패: " 만 찍혀 원인을 볼 수 없다 (2026-08-08).
+            why = result.error.strip() or result.output.strip().replace("\n", " ")
+            status = "완료" if result.ok else f"실패: {why[:150]}"
             tail = " · 끝에 한도 재도달" if result.limit_mentioned else ""
             print(f"  └ {how} · {result.elapsed_sec:.0f}초 · {result.work_chars}자 · {status}{tail}")
             notify(cfg, f"[afterlimit] {session.project} {how} — {status}")
