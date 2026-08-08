@@ -57,13 +57,40 @@ def test_구조적_실패시_fresh_폴백():
     assert "테스트 고쳐줘" in run.call_args[0][0][2]
 
 
-def test_또_한도에_걸리면_폴백하지_않는다():
-    """한도 재발은 구조적 실패가 아니다 — 새로 시작하면 안 되고 그대로 반환한다."""
+def test_일하다_한도에_걸리면_폴백하지_않는다():
+    """이미 진척이 있었으면 새로 시작하면 안 된다 — 한 일을 버리게 된다."""
     cfg = Config()
-    with patch("afterlimit.resume._run", return_value=(1, "usage limit reached", "", 1.0)) as run:
+    work = "초안을 만들어 커밋했습니다. " * 20  # 200자 넘김
+    with patch("afterlimit.resume._run",
+               return_value=(0, f"{work}\nusage limit reached", "", 300.0)) as run:
         r = resume(_session(), cfg)
-    assert run.call_count == 1  # 폴백 없음
-    assert r.hit_limit_again
+    assert run.call_count == 1          # 폴백 없음
+    assert not r.hit_limit_again        # 진척이 있었으니 실패가 아니다
+
+
+def test_아무것도_못_하고_튕기면_맥락_요약으로_새로_시작한다():
+    """세션이 너무 커서 맥락을 싣는 것만으로 한도를 넘는 경우.
+
+    실측(2026-08-08): 이어가기에 성공한 세션은 14~278줄인데, 9,499줄짜리는 매번
+    7초 만에 115자(한도 메시지)만 내고 튕겼다. 이럴 땐 마지막 대화만 요약해
+    새로 시작하는 쪽이 훨씬 싸고 실제로 이어진다.
+    """
+    cfg = Config()
+    outcomes = [(1, "usage limit reached", "", 7.0), (0, "이어서 마쳤습니다", "", 40.0)]
+    with patch("afterlimit.resume._run", side_effect=outcomes) as run:
+        r = resume(_session(), cfg)
+    assert run.call_count == 2          # 폴백을 시도한다
+    assert r.ok and r.fallback
+    assert "테스트 고쳐줘" in run.call_args[0][0][2]   # 맥락이 실린다
+
+
+def test_새로_시작해도_튕기면_백오프가_걸리게_한다():
+    cfg = Config()
+    lim = (1, "usage limit reached", "", 5.0)
+    with patch("afterlimit.resume._run", side_effect=[lim, lim]) as run:
+        r = resume(_session(), cfg)
+    assert run.call_count == 2
+    assert r.hit_limit_again            # 실패로 세어 다음 시도를 재운다
 
 
 def test_hit_limit_again_판정():

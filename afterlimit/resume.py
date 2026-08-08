@@ -86,9 +86,16 @@ def resume(session: BlockedSession, cfg: Config) -> ResumeResult:
     )
     result = ResumeResult(rc == 0, False, out, err, elapsed)
 
-    # 또 한도에 걸렸거나 정상 응답이면 그대로 둔다. 구조적 실패일 때만 새로 시작한다.
+    # 새로 시작해볼 두 경우.
+    #  ① 구조적 실패 — 세션을 못 찾는 등. 이어갈 방법이 아예 없다.
+    #  ② 아무것도 못 하고 즉시 한도에 튕김 — 세션이 너무 커서 맥락을 통째로 싣는
+    #     것만으로 한도를 넘는 경우다. 2026-08-08 실측: 이어가기에 성공한 세션은
+    #     14~278줄인데(11건), 9,499줄짜리는 매번 7초 만에 115자(한도 메시지)만
+    #     내고 튕겼다. 278줄보다 큰 세션이 성공한 적은 한 번도 없다.
+    #     이럴 땐 마지막 대화만 요약해 새로 시작하는 쪽이 훨씬 싸고, 실제로 이어진다.
     structural_fail = rc != 0 and not out.strip() and not result.hit_limit_again
-    if not structural_fail:
+    bounced_instantly = result.hit_limit_again and result.work_chars < MIN_WORK_CHARS
+    if not (structural_fail or bounced_instantly):
         return result
 
     context = ""
@@ -104,4 +111,8 @@ def resume(session: BlockedSession, cfg: Config) -> ResumeResult:
         session.cwd,
         cfg.invoke_timeout_sec,
     )
-    return ResumeResult(rc == 0, True, out, err, elapsed + elapsed2)
+    retry = ResumeResult(rc == 0, True, out, err, elapsed + elapsed2)
+    # 새로 시작해도 즉시 튕기면 원래 결과를 돌려준다 — 그래야 백오프가 걸린다.
+    if bounced_instantly and retry.hit_limit_again and retry.work_chars < MIN_WORK_CHARS:
+        return ResumeResult(False, False, result.output, result.error, elapsed + elapsed2)
+    return retry
