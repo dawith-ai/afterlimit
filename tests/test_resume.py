@@ -131,3 +131,19 @@ def test_한도_문구가_없으면_당연히_실패가_아니다():
 def test_산출량은_한도_안내줄을_빼고_센다():
     r = ResumeResult(True, False, f"{_LIMIT}\n짧은답", "", 5.0)
     assert r.work_chars == len("짧은답")   # 안내 문구는 산출로 치지 않는다
+
+
+# ── 인증 만료 ────────────────────────────────────────────────────────────
+#
+# 회귀 방지. 2026-08-08: claude CLI 로그인이 9시간 풀려 있는 동안 afterlimit 이
+# 재개를 수십 번 시도했고, 매번 5~10초 만에 'Not logged in · Please run /login'
+# 만 받고 실패했다. 세션 크기·한도와 무관한 환경 전체의 전제조건이었다.
+
+def test_로그인_풀림_문구를_인식한다():
+    r = ResumeResult(False, False, "Not logged in · Please run /login", "", 5.0)
+    assert r.auth_expired
+
+
+def test_평범한_실패는_인증만료가_아니다():
+    r = ResumeResult(False, False, "usage limit reached", "", 5.0)
+    assert not r.auth_expired

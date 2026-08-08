@@ -31,6 +31,18 @@ class ResumeResult:
     elapsed_sec: float
 
     @property
+    def auth_expired(self) -> bool:
+        """claude CLI 로그인 자체가 풀렸다.
+
+        2026-08-08 실측: 로그인이 9시간 풀려 있는 동안 afterlimit 이 재개를 수십 번
+        시도했고, 매번 5~10초 만에 'Not logged in · Please run /login' 만 받고 실패했다.
+        세션 크기·한도와 무관한 **환경 전체의 전제조건**이라, 지출 한도와 달리
+        이건 정말로 전역이다 — 사람이 로그인하기 전엔 세션이 몇 줄이든 전부 막힌다.
+        """
+        blob = f"{self.output}\n{self.error}".lower()
+        return "not logged in" in blob or "please run /login" in blob
+
+    @property
     def limit_mentioned(self) -> bool:
         """출력 어딘가에 한도 문구가 있다. 이것만으론 실패인지 알 수 없다."""
         blob = f"{self.output}\n{self.error}".lower()

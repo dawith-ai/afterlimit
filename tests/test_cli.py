@@ -237,3 +237,15 @@ def test_저장은_남의_변경을_지우지_않는다(tmp_path):
     after = cli._load_state(cfg)
     assert after["a"]["fails"] == 2      # 내 변경은 반영되고
     assert "b" in after                  # 남의 변경도 살아남는다
+
+
+# ── 인증 만료 전역 게이트 ────────────────────────────────────────────────
+
+def test_로그인_풀린_직후엔_사이클_전체를_건너뛴다():
+    state = {cli._GLOBAL: {"auth_expired_at": NOW.isoformat()}}
+    assert cli._auth_ready(state, NOW + timedelta(minutes=10)) is not None
+    assert cli._auth_ready(state, NOW + timedelta(minutes=31)) is None
+
+
+def test_인증만료_기록이_없으면_평소대로_진행한다():
+    assert cli._auth_ready({}, NOW) is None

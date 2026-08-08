@@ -195,6 +195,30 @@ def cmd_scan(cfg: Config) -> int:
     return 0
 
 
+#: claude CLI 로그인이 풀렸을 때 다시 확인하기까지 기다리는 시간.
+#: 사람이 조치해야 풀리는 조건이라 지출 한도와 같은 성격이지만, 이건 세션 크기와
+#: 무관하게 **환경 전체**를 막으므로 전역으로 다뤄도 된다(2026-08-08 실측 근거로 확정 —
+#: 지출 한도 때와 달리 이번엔 실제로 전 세션이 예외 없이 같은 이유로 막혔다).
+AUTH_RETRY_MINUTES = 30
+
+
+def _auth_ready(state: dict, now: datetime) -> str | None:
+    """로그인이 최근에 풀린 걸로 확인됐으면 재개를 건너뛸 이유. 괜찮으면 None."""
+    at_raw = state.get(_GLOBAL, {}).get("auth_expired_at")
+    if not isinstance(at_raw, str):
+        return None
+    try:
+        at = datetime.fromisoformat(at_raw)
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=now.tzinfo)
+    left = timedelta(minutes=AUTH_RETRY_MINUTES) - (now - at)
+    if left <= timedelta(0):
+        return None
+    return f"claude 로그인이 풀려 있었음 · {left.total_seconds() / 60:.0f}분 뒤 다시 확인 (/login)"
+
+
 def cmd_run(cfg: Config) -> int:
     lock = _acquire_lock(cfg)
     if lock is None:
@@ -205,6 +229,10 @@ def cmd_run(cfg: Config) -> int:
         now = datetime.now(local_tz())
         state = _load_state(cfg)
         resumed = 0
+
+        if reason := _auth_ready(state, now):
+            print(f"건너뜀 — {reason}")
+            return 0
 
         for session in scan_blocked(cfg, now):
             if resumed >= cfg.max_resume_per_cycle:
@@ -218,6 +246,20 @@ def cmd_run(cfg: Config) -> int:
             resumed += 1
 
             sid, kind, proj = session.session_id, session.limit.kind, session.project
+
+            if result.auth_expired:
+                # 이건 이 세션만의 문제가 아니다. claude CLI 로그인은 전 세션 공통이므로
+                # 즉시 멈추고 전역에 남긴다 — 나머지 세션도 같은 이유로 하나씩 튕기며
+                # 사이클을 낭비할 이유가 없다. 2026-08-08 실측: 로그인이 9시간 풀려 있는 동안
+                # 재개 수십 건이 전부 5~10초 만에 'Not logged in' 으로 튕겼다.
+                def _auth_fail(s: dict) -> None:
+                    s.setdefault(_GLOBAL, {})["auth_expired_at"] = now.isoformat()
+
+                _commit(cfg, _auth_fail)
+                print(f"  └ claude 로그인이 풀려 있습니다. /login 실행 후 다시 시도됩니다"
+                      f" ({AUTH_RETRY_MINUTES}분 뒤).")
+                notify(cfg, "[afterlimit] claude 로그인이 풀렸습니다 — /login 을 실행해 주세요.")
+                break  # 이번 사이클은 여기서 접는다. 남은 세션도 같은 이유로 다 막혀 있다.
 
             if result.hit_limit_again:
                 # 실제로 이어간 게 아니니 성공 쿨다운은 안 준다. 대신 실패를 세어 재운다.
