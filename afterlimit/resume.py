@@ -112,7 +112,10 @@ def resume(session: BlockedSession, cfg: Config) -> ResumeResult:
         cfg.invoke_timeout_sec,
     )
     retry = ResumeResult(rc == 0, True, out, err, elapsed + elapsed2)
-    # 새로 시작해도 즉시 튕기면 원래 결과를 돌려준다 — 그래야 백오프가 걸린다.
+    # 새로 시작해도 즉시 튕기면 백오프가 걸리게 실패로 돌려준다.
+    # ⚠️ 원래 결과로 통째로 덮으면 "폴백을 시도했다"는 사실이 로그에서 사라진다.
+    #    2026-08-08 그 때문에 폴백이 도는지 안 도는지 눈으로 확인할 수 없었다.
+    #    fallback=True 를 남겨 시도 사실을 보존한다.
     if bounced_instantly and retry.hit_limit_again and retry.work_chars < MIN_WORK_CHARS:
-        return ResumeResult(False, False, result.output, result.error, elapsed + elapsed2)
+        return ResumeResult(False, True, result.output, err or result.error, elapsed + elapsed2)
     return retry
