@@ -130,24 +130,13 @@ def _at(raw: object, now: datetime) -> datetime | None:
 _GLOBAL = "_global"
 
 
-def _spend_wait(state: dict, now: datetime) -> str | None:
-    """계정 지출 한도로 막혀 있는 동안의 전역 대기.
-
-    지출 한도는 **계정 전체** 조건이다. 한 세션이 튕겼으면 나머지도 전부 튕긴다.
-    세션마다 따로 배우게 두면 76개가 각자 부딪혀 하룻밤에 300번을 헛되이 태운다
-    (2026-08-08 실측: 최근 100회 시도 중 성공 1건). 한 번 튕기면 전부 같이 쉰다.
-    간격은 세션별 백오프와 같다 — 1·2·4·8·16시간, 최대 24시간.
-    """
-    e = state.get(_GLOBAL, {})
-    at = _at(e.get("spend_failed_at"), now)
-    if not at:
-        return None
-    fails = int(e.get("spend_fails", 1) or 1)
-    left = backoff_for(fails) - (now - at)
-    if left > timedelta(0):
-        return (f"계정 지출 한도 {fails}회 확인됨 · "
-                f"{left.total_seconds() / 3600:.1f}시간 뒤 다시 확인 (/usage-credits)")
-    return None
+# 전역 지출 한도 대기는 걷어냈다 (2026-08-08).
+#
+# "지출 한도는 계정 전체 조건이니 한 세션이 튕기면 나머지도 전부 튕긴다" 는 전제로
+# 만들었는데, 이어서 잰 값이 그 전제를 뒤집었다. 이어가기에 성공한 세션은 14~278줄,
+# 매번 튕긴 세션은 9,499줄이었다 — 계정 조건이 아니라 **세션 크기** 조건이었다.
+# 전역으로 막아 두니 한 번의 튕김이 잘 되던 작은 세션까지 몇 시간씩 굶겼다.
+# 낭비는 세션별 백오프와 큰 세션 폴백으로 잡는다.
 
 
 def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> str | None:
@@ -165,8 +154,6 @@ def _due(session: BlockedSession, state: dict, cfg: Config, now: datetime) -> st
         #    실패 1회당 1·2·4·8·16시간, 최대 24시간으로 간격을 벌린다.
         if session.limit.kind not in ("spend", "stalled"):
             return "해제 시각 불명"
-        if session.limit.kind == "spend" and (reason := _spend_wait(state, now)):
-            return reason
 
     entry = state.get(session.session_id, {})
 
@@ -240,11 +227,6 @@ def cmd_run(cfg: Config) -> int:
                     e["project"] = proj
                     e["fails"] = int(e.get("fails", 0) or 0) + 1
                     e["failed_at"] = now.isoformat()
-                    if kind == "spend":
-                        # 계정 전체 조건이므로 전역에도 적어 나머지 세션까지 같이 재운다
-                        g = s.setdefault(_GLOBAL, {})
-                        g["spend_fails"] = int(g.get("spend_fails", 0) or 0) + 1
-                        g["spend_failed_at"] = now.isoformat()
 
                 _commit(cfg, _fail)
                 state = _load_state(cfg)
